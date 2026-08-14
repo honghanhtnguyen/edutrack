@@ -249,6 +249,7 @@
    Lưu ý: localStorage chỉ lưu trên MÁY/TRÌNH DUYỆT đang mở, không
    đồng bộ giữa các thiết bị hay giữa nhiều người dùng khác nhau.
 ============================================================ */
+const APP_VERSION = '2026-08-14.3';
 const RUNNING_STANDALONE = (typeof window.storage === 'undefined');
 if(RUNNING_STANDALONE){
   window.storage = {
@@ -472,6 +473,7 @@ const state = {
   dailyTasks: {}, // { 'YYYY-MM-DD': { taskId: true } } — các việc đã tick xong theo từng ngày
   dailyTaskTemplates: [], // [{id, title}] — danh sách việc lặp lại mỗi ngày, tự nạp/seed khi khởi động
   syncPanelOpen: false,
+  syncShowConfigForm: false,
   loaded:false,
   modal:null, // {type:'prompt'|'confirm', title, value, danger, onSubmit}
   teacherName: '',
@@ -920,14 +922,11 @@ function render(){
           </div>`).join('')}
       `).join('')}
       <div class="sidebar-foot">
-        <div style="margin-bottom:8px;">${RUNNING_STANDALONE ? '💻 Đang chạy độc lập: dữ liệu lưu ngay trên trình duyệt này, không đồng bộ sang máy/thiết bị khác.' : '⚠ Chế độ dùng chung: mọi người mở file này đều thấy và sửa được cùng một dữ liệu.'}</div>
-        <div style="display:flex; gap:6px; flex-wrap:wrap;">
-          <button class="btn btn-outline btn-sm" data-action="export-backup" style="font-size:11.5px;padding:5px 9px;">⬇ Sao lưu</button>
-          <button class="btn btn-outline btn-sm" data-action="trigger-backup-import" style="font-size:11.5px;padding:5px 9px;">⬆ Khôi phục</button>
-        </div>
-        <input type="file" id="backup-file-input" accept=".json" style="display:none;">
+        <div>${RUNNING_STANDALONE ? '💻 Đang chạy độc lập: dữ liệu lưu ngay trên trình duyệt này — dùng thẻ "Đồng bộ &amp; Sao lưu" ở Trang chủ để đồng bộ nhiều thiết bị.' : '⚠ Chế độ dùng chung: mọi người mở file này đều thấy và sửa được cùng một dữ liệu.'}</div>
+        <div class="tiny" style="margin-top:8px;opacity:.7;">Phiên bản app: ${APP_VERSION}</div>
       </div>
     </div>
+    <input type="file" id="backup-file-input" accept=".json" style="display:none;">
     <div class="main">${renderTab()}</div>
     ${renderModal()}
   `;
@@ -981,13 +980,80 @@ function getTodaySuggestions(){
   return suggestions;
 }
 
+function renderSyncCard(){
+  return `
+    <div class="data-card">
+      <div class="data-row">
+        <div class="data-row-icon peach">💾</div>
+        <div class="data-row-body">
+          <div class="data-row-title">Xuất toàn bộ dữ liệu (backup)</div>
+          <div class="data-row-desc">Tải về 1 file duy nhất chứa toàn bộ dữ liệu — nên làm định kỳ để phòng rủi ro mất dữ liệu, không phụ thuộc hoàn toàn vào trình duyệt.</div>
+          <div class="data-row-status ${getLastBackupAt()?'ok':'warn'}">${getLastBackupAt()? '✓ Đã sao lưu · '+fmtDateTimeVN(getLastBackupAt()) : '⚠ Bạn chưa sao lưu lần nào'}</div>
+          <div class="tiny" style="margin-top:6px;"><span style="text-decoration:underline;cursor:pointer;color:var(--ink-soft);" data-action="trigger-backup-import">⬆ Khôi phục từ file đã sao lưu</span></div>
+        </div>
+        <button class="pill-btn pill-btn-solid" data-action="export-backup">⬇ Xuất ngay</button>
+      </div>
+
+      <div class="data-row">
+        <div class="data-row-icon blue">🔄</div>
+        <div class="data-row-body">
+          <div class="data-row-title">Đồng bộ đa thiết bị</div>
+          <div class="data-row-status ${syncActive()?'ok':'off'}">${syncActive()? '🟢 Đã đồng bộ'+(getLastSyncAt()? ' · '+fmtDateTimeVN(getLastSyncAt()) : '') : (firebaseReady()? '⚪ Chưa kết nối' : '⚪ Chưa cấu hình')}</div>
+        </div>
+        <button class="pill-btn pill-btn-outline" data-action="toggle-sync-panel">${state.syncPanelOpen? 'Thu gọn' : 'Xem/Sửa'}</button>
+      </div>
+    </div>
+
+    ${state.syncPanelOpen ? `
+    <div class="sync-detail-panel">
+      ${firebaseReady() ? (
+        syncActive() ? `
+        <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:8px;">
+          <span class="sync-badge sync-badge-on">🟢 Đang đồng bộ đa thiết bị</span>
+        </div>
+        <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin-bottom:10px;">
+          <span class="tiny mono" style="background:var(--surface-alt); padding:6px 10px; border-radius:8px;">Mã: ${esc(getSyncCode())}</span>
+          <button class="btn btn-outline btn-sm" data-action="copy-sync-code">📋 Copy mã</button>
+          <button class="btn btn-outline btn-sm" style="margin-left:auto;" data-action="sync-disconnect">Ngắt kết nối</button>
+        </div>
+        <div class="tiny">Gõ đúng mã này trên điện thoại/máy tính khác để cùng thấy chung dữ liệu.</div>
+        ` : `
+        <div class="tiny" style="margin-bottom:10px;">Đặt 1 mã tuỳ ý (giống mật khẩu) — gõ đúng mã đó trên mọi thiết bị để đồng bộ dữ liệu qua lại.</div>
+        <div style="display:flex; gap:8px; flex-wrap:wrap;">
+          <input type="text" id="sync-code-input" placeholder="VD: hoa-thcs-trungvuong">
+          <button class="btn btn-accent btn-sm" data-action="sync-connect">☁️ Kết nối đồng bộ</button>
+        </div>
+        <div class="tiny" style="margin-top:10px;">Đã cấu hình Firebase dự án: <b>${esc(FIREBASE_CONFIG.projectId||'')}</b> · <span style="color:var(--ink-soft);text-decoration:underline;cursor:pointer;" data-action="show-firebase-config-form">Dùng dự án Firebase khác</span></div>
+        ${state.syncShowConfigForm ? `
+        <div style="margin-top:12px; padding-top:12px; border-top:1px solid var(--line);">
+          <div class="tiny" style="margin-bottom:8px;">Dán đoạn cấu hình <b>firebaseConfig</b> của dự án khác vào đây rồi bấm Lưu — trang sẽ tự tải lại và chuyển sang dùng dự án mới:</div>
+          <textarea id="firebase-config-input" rows="6" placeholder='const firebaseConfig = { apiKey: "...", ... };' style="font-family:'IBM Plex Mono',monospace;font-size:13px;"></textarea>
+          <div style="margin-top:8px; text-align:right;">
+            <button class="btn btn-accent btn-sm" data-action="save-firebase-config">💾 Lưu cấu hình mới</button>
+          </div>
+        </div>` : ''}
+        `
+      ) : `
+        <div class="tiny sync-badge sync-badge-off" style="display:inline-block;margin-bottom:10px;">⚪ Chưa cấu hình Firebase — dữ liệu vẫn lưu bình thường trên thiết bị này, chỉ chưa đồng bộ đa thiết bị được.</div>
+        <div class="tiny" style="margin-bottom:8px;">Dán nguyên đoạn cấu hình <b>firebaseConfig</b> lấy từ Firebase Console vào ô bên dưới (không cần sửa file gì cả):</div>
+        <textarea id="firebase-config-input" rows="6" placeholder='const firebaseConfig = {&#10;  apiKey: "AIzaSy...",&#10;  authDomain: "ten-du-an.firebaseapp.com",&#10;  projectId: "ten-du-an",&#10;  storageBucket: "ten-du-an.appspot.com",&#10;  messagingSenderId: "...",&#10;  appId: "..."&#10;};' style="font-family:'IBM Plex Mono',monospace;font-size:13px;"></textarea>
+        <div style="margin-top:8px; text-align:right;">
+          <button class="btn btn-accent btn-sm" data-action="save-firebase-config">💾 Lưu cấu hình</button>
+        </div>
+      `}
+    </div>` : ''}
+    <div class="tiny" style="text-align:center; color:var(--ink-faint); margin:-8px 0 18px;">Phiên bản app: ${APP_VERSION}</div>
+  `;
+}
+
 function renderHome(){
   if(!state.classes.length){
     return `
-      <div class="topbar"><div><h1 class="page-title">Trang chủ</h1>${chalkUnderline()}<div class="page-sub">Bắt đầu bằng cách tạo lớp học đầu tiên</div></div></div>
+      <div class="topbar"><div><h1 class="page-title">Trang chủ</h1>${chalkUnderline()}<div class="page-sub">Bắt đầu bằng cách tạo lớp học đầu tiên, hoặc kết nối đồng bộ để lấy dữ liệu từ thiết bị khác</div></div></div>
+      ${renderSyncCard()}
       <div class="card empty">
         <h3>Chưa có lớp học nào</h3>
-        <div class="muted" style="margin-bottom:14px;">Tạo lớp và thêm danh sách học sinh để bắt đầu ghi nhận buổi học.</div>
+        <div class="muted" style="margin-bottom:14px;">Tạo lớp và thêm danh sách học sinh để bắt đầu ghi nhận buổi học — hoặc nếu đã có dữ liệu ở thiết bị khác, dùng thẻ "Đồng bộ đa thiết bị" ở trên để lấy về.</div>
         <button class="btn btn-accent" data-action="go-classes">+ Tạo lớp học</button>
       </div>`;
   }
@@ -1056,55 +1122,7 @@ function renderHome(){
         </div>`).join('')}
     </div>
 
-    <div class="data-card">
-      <div class="data-row">
-        <div class="data-row-icon peach">💾</div>
-        <div class="data-row-body">
-          <div class="data-row-title">Xuất toàn bộ dữ liệu (backup)</div>
-          <div class="data-row-desc">Tải về 1 file duy nhất chứa toàn bộ dữ liệu — nên làm định kỳ để phòng rủi ro mất dữ liệu, không phụ thuộc hoàn toàn vào trình duyệt.</div>
-          <div class="data-row-status ${getLastBackupAt()?'ok':'warn'}">${getLastBackupAt()? '✓ Đã sao lưu · '+fmtDateTimeVN(getLastBackupAt()) : '⚠ Bạn chưa sao lưu lần nào'}</div>
-          <div class="tiny" style="margin-top:6px;"><span style="text-decoration:underline;cursor:pointer;color:var(--ink-soft);" data-action="trigger-backup-import">⬆ Khôi phục từ file đã sao lưu</span></div>
-        </div>
-        <button class="pill-btn pill-btn-solid" data-action="export-backup">⬇ Xuất ngay</button>
-      </div>
-
-      <div class="data-row">
-        <div class="data-row-icon blue">🔄</div>
-        <div class="data-row-body">
-          <div class="data-row-title">Đồng bộ đa thiết bị</div>
-          <div class="data-row-status ${syncActive()?'ok':'off'}">${syncActive()? '🟢 Đã đồng bộ'+(getLastSyncAt()? ' · '+fmtDateTimeVN(getLastSyncAt()) : '') : (firebaseReady()? '⚪ Chưa kết nối' : '⚪ Chưa cấu hình')}</div>
-        </div>
-        <button class="pill-btn pill-btn-outline" data-action="toggle-sync-panel">${state.syncPanelOpen? 'Thu gọn' : 'Xem/Sửa'}</button>
-      </div>
-    </div>
-
-    ${state.syncPanelOpen ? `
-    <div class="sync-detail-panel">
-      ${firebaseReady() ? (
-        syncActive() ? `
-        <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:8px;">
-          <span class="sync-badge sync-badge-on">🟢 Đang đồng bộ đa thiết bị</span>
-          <span class="tiny mono">Mã: ${esc(getSyncCode())}</span>
-          <button class="btn btn-outline btn-sm" style="margin-left:auto;" data-action="sync-disconnect">Ngắt kết nối</button>
-        </div>
-        <div class="tiny">Gõ đúng mã này trên điện thoại/máy tính khác để cùng thấy chung dữ liệu.</div>
-        ` : `
-        <div class="tiny" style="margin-bottom:10px;">Đặt 1 mã tuỳ ý (giống mật khẩu) — gõ đúng mã đó trên mọi thiết bị để đồng bộ dữ liệu qua lại.</div>
-        <div style="display:flex; gap:8px; flex-wrap:wrap;">
-          <input type="text" id="sync-code-input" placeholder="VD: hoa-thcs-trungvuong">
-          <button class="btn btn-accent btn-sm" data-action="sync-connect">☁️ Kết nối đồng bộ</button>
-        </div>
-        <div class="tiny" style="margin-top:10px;">Đã cấu hình Firebase dự án: <b>${esc(FIREBASE_CONFIG.projectId||'')}</b> · <span style="color:var(--danger);text-decoration:underline;cursor:pointer;" data-action="reset-firebase-config">Đổi/xoá cấu hình</span></div>
-        `
-      ) : `
-        <div class="tiny sync-badge sync-badge-off" style="display:inline-block;margin-bottom:10px;">⚪ Chưa cấu hình Firebase — dữ liệu vẫn lưu bình thường trên thiết bị này, chỉ chưa đồng bộ đa thiết bị được.</div>
-        <div class="tiny" style="margin-bottom:8px;">Dán nguyên đoạn cấu hình <b>firebaseConfig</b> lấy từ Firebase Console vào ô bên dưới (không cần sửa file gì cả):</div>
-        <textarea id="firebase-config-input" rows="6" placeholder='const firebaseConfig = {&#10;  apiKey: "AIzaSy...",&#10;  authDomain: "ten-du-an.firebaseapp.com",&#10;  projectId: "ten-du-an",&#10;  storageBucket: "ten-du-an.appspot.com",&#10;  messagingSenderId: "...",&#10;  appId: "..."&#10;};' style="font-family:'IBM Plex Mono',monospace;font-size:13px;"></textarea>
-        <div style="margin-top:8px; text-align:right;">
-          <button class="btn btn-accent btn-sm" data-action="save-firebase-config">💾 Lưu cấu hình</button>
-        </div>
-      `}
-    </div>` : ''}
+    ${renderSyncCard()}
 
     <div class="grid-3" style="margin-bottom:18px;">
       <div class="card" style="margin-bottom:0;"><div class="stat-num">${state.classes.length}</div><div class="stat-label">Lớp học</div></div>
@@ -4220,15 +4238,7 @@ async function handleAction(action, elx, e){
       setTimeout(()=> location.reload(), 1200);
       break;
     }
-    case 'reset-firebase-config': {
-      openConfirmModal('Đổi/xoá cấu hình Firebase đang dùng riêng trên thiết bị này? Sẽ quay về cấu hình mặc định của lớp (nếu có), và cần nhập lại mã đồng bộ.', true, ()=>{
-        clearStoredFirebaseConfig();
-        clearSyncCode();
-        showToast('Đã đặt lại cấu hình — đang tải lại trang...', 2000);
-        setTimeout(()=> location.reload(), 1000);
-      });
-      break;
-    }
+    case 'show-firebase-config-form': state.syncShowConfigForm = !state.syncShowConfigForm; render(); break;
     case 'sync-connect': {
       if(!firebaseReady()){ showToast('Chưa cấu hình Firebase.'); break; }
       const inp = document.getElementById('sync-code-input');
@@ -4265,6 +4275,13 @@ async function handleAction(action, elx, e){
           render();
         }
       })();
+      break;
+    }
+    case 'copy-sync-code': {
+      const code = getSyncCode();
+      copyTextToClipboard(code).then(ok=>{
+        showToast(ok ? 'Đã copy mã đồng bộ.' : 'Không copy được — mã của cô là: '+code, 4000);
+      });
       break;
     }
     case 'sync-disconnect': {
@@ -5149,13 +5166,19 @@ async function handleAction(action, elx, e){
   render();
 })();
 
-// Đăng ký service worker cho PWA (chỉ có tác dụng khi host độc lập kèm
-// đủ file manifest.json/service-worker.js/icon — trong Claude sẽ tự bỏ qua).
+// Tạm gỡ bỏ hoàn toàn service worker/cache cũ (nếu thiết bị đã từng cài từ bản trước) —
+// để đảm bảo mọi thiết bị luôn lấy đúng bản mới nhất khi cô cập nhật file, không bị
+// kẹt lại bản cũ do cơ chế cache ngoại tuyến (PWA) từng thêm trước đây.
 try{
   if('serviceWorker' in navigator){
-    window.addEventListener('load', ()=>{
-      navigator.serviceWorker.register('service-worker.js').catch(()=>{});
-    });
+    navigator.serviceWorker.getRegistrations().then(regs=>{
+      regs.forEach(reg=> reg.unregister());
+    }).catch(()=>{});
+  }
+  if('caches' in window){
+    caches.keys().then(keys=>{
+      keys.forEach(k=> caches.delete(k));
+    }).catch(()=>{});
   }
 }catch(e){}
 </script>
