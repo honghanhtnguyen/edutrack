@@ -268,15 +268,45 @@ if(RUNNING_STANDALONE){
    ĐỒNG BỘ FIRESTORE (đa thiết bị: điện thoại ↔ máy tính)
    ------------------------------------------------------------
    1) Tạo dự án Firebase + bật Firestore (xem hướng dẫn cô nhận kèm).
-   2) Dán 6 dòng cấu hình dự án của cô vào FIREBASE_CONFIG bên dưới,
-      thay cho các giá trị "" (chuỗi rỗng).
-   3) Xong bước đó, mở app → vào Trang chủ → thẻ "☁️ Đồng bộ & Sao lưu"
-      → đặt 1 "Mã đồng bộ" tuỳ ý (VD: "hoa-thcs-trungvuong") → gõ đúng
-      mã đó trên mọi thiết bị muốn dùng chung dữ liệu.
-   Nếu để nguyên FIREBASE_CONFIG rỗng, app hoạt động như cũ (không đổi
-   gì) — không bắt buộc phải dùng Firebase.
+   2) KHÔNG cần sửa file — mở app → vào Trang chủ → thẻ
+      "☁️ Đồng bộ & Sao lưu" → dán nguyên đoạn "firebaseConfig" từ
+      Firebase Console vào ô trên web → bấm Lưu → trang tự tải lại.
+   3) Sau đó đặt 1 "Mã đồng bộ" tuỳ ý (VD: "hoa-thcs-trungvuong") →
+      gõ đúng mã đó trên mọi thiết bị muốn dùng chung dữ liệu.
+   Nếu chưa cấu hình gì, app hoạt động như cũ — không bắt buộc dùng Firebase.
 ============================================================ */
-const FIREBASE_CONFIG = {
+function loadStoredFirebaseConfig(){
+  try{
+    const raw = localStorage.getItem('edutrack_firebase_config');
+    if(!raw) return null;
+    const obj = JSON.parse(raw);
+    return (obj && obj.apiKey) ? obj : null;
+  }catch(e){ return null; }
+}
+function saveStoredFirebaseConfig(obj){
+  try{ localStorage.setItem('edutrack_firebase_config', JSON.stringify(obj)); return true; }
+  catch(e){ return false; }
+}
+function clearStoredFirebaseConfig(){
+  try{ localStorage.removeItem('edutrack_firebase_config'); }catch(e){}
+}
+// Chấp nhận cả JSON thuần lẫn nguyên đoạn code Firebase hay đưa ra
+// (VD: "const firebaseConfig = { apiKey: \"...\", ... };") — tự cắt lấy
+// đúng phần { ... } rồi phân tích, không bắt cô phải sửa lại cú pháp.
+function parseFirebaseConfigInput(text){
+  if(!text) return null;
+  const start = text.indexOf('{');
+  const end = text.lastIndexOf('}');
+  if(start===-1 || end===-1 || end<start) return null;
+  const objText = text.slice(start, end+1);
+  try{
+    const obj = new Function('return (' + objText + ')')();
+    if(obj && typeof obj==='object' && obj.apiKey && obj.projectId) return obj;
+  }catch(e){}
+  return null;
+}
+
+const FIREBASE_CONFIG = loadStoredFirebaseConfig() || {
   apiKey: "",
   authDomain: "",
   projectId: "",
@@ -964,8 +994,16 @@ function renderHome(){
           <input type="text" id="sync-code-input" placeholder="VD: hoa-thcs-trungvuong">
           <button class="btn btn-accent btn-sm" data-action="sync-connect">☁️ Kết nối đồng bộ</button>
         </div>
+        <div class="tiny" style="margin-top:10px;">Đã cấu hình Firebase dự án: <b>${esc(FIREBASE_CONFIG.projectId||'')}</b> · <span style="color:var(--danger);text-decoration:underline;cursor:pointer;" data-action="reset-firebase-config">Đổi/xoá cấu hình</span></div>
         `
-      ) : `<div class="tiny sync-badge sync-badge-off" style="display:inline-block;margin-bottom:4px;">⚪ Chưa cấu hình Firebase — dữ liệu vẫn lưu bình thường trên thiết bị này, chỉ chưa đồng bộ đa thiết bị được.</div>`}
+      ) : `
+        <div class="tiny sync-badge sync-badge-off" style="display:inline-block;margin-bottom:10px;">⚪ Chưa cấu hình Firebase — dữ liệu vẫn lưu bình thường trên thiết bị này, chỉ chưa đồng bộ đa thiết bị được.</div>
+        <div class="tiny" style="margin-bottom:8px;">Dán nguyên đoạn cấu hình <b>firebaseConfig</b> lấy từ Firebase Console vào ô bên dưới (không cần sửa file gì cả):</div>
+        <textarea id="firebase-config-input" rows="6" placeholder='const firebaseConfig = {&#10;  apiKey: "AIzaSy...",&#10;  authDomain: "ten-du-an.firebaseapp.com",&#10;  projectId: "ten-du-an",&#10;  storageBucket: "ten-du-an.appspot.com",&#10;  messagingSenderId: "...",&#10;  appId: "..."&#10;};' style="font-family:'IBM Plex Mono',monospace;font-size:13px;"></textarea>
+        <div style="margin-top:8px; text-align:right;">
+          <button class="btn btn-accent btn-sm" data-action="save-firebase-config">💾 Lưu cấu hình</button>
+        </div>
+      `}
       <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:14px; padding-top:14px; border-top:1px solid var(--line);">
         <button class="btn btn-outline btn-sm" data-action="export-backup">⬇ Sao lưu ra file</button>
         <button class="btn btn-outline btn-sm" data-action="trigger-backup-import">⬆ Khôi phục từ file</button>
@@ -4070,6 +4108,28 @@ async function handleAction(action, elx, e){
       state.tab = elx.dataset.tab;
       if(elx.dataset.section){ state.homeroom.section = elx.dataset.section; }
       render();
+      break;
+    }
+    case 'save-firebase-config': {
+      const ta = document.getElementById('firebase-config-input');
+      const text = ta ? ta.value : '';
+      const parsed = parseFirebaseConfigInput(text);
+      if(!parsed){
+        showToast('Không đọc được cấu hình — cô kiểm tra lại đã dán đủ và đúng đoạn firebaseConfig chưa nhé.', 4000);
+        break;
+      }
+      saveStoredFirebaseConfig(parsed);
+      showToast('Đã lưu cấu hình — đang tải lại trang...', 2500);
+      setTimeout(()=> location.reload(), 1200);
+      break;
+    }
+    case 'reset-firebase-config': {
+      openConfirmModal('Xoá cấu hình Firebase hiện tại? Cô sẽ cần dán lại cấu hình (mới hoặc cũ) để tiếp tục đồng bộ.', true, ()=>{
+        clearStoredFirebaseConfig();
+        clearSyncCode();
+        showToast('Đã xoá cấu hình — đang tải lại trang...', 2000);
+        setTimeout(()=> location.reload(), 1000);
+      });
       break;
     }
     case 'sync-connect': {
