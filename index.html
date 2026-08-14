@@ -154,6 +154,27 @@
   .sync-badge{ display:inline-flex; align-items:center; gap:5px; padding:4px 10px; border-radius:20px; font-size:12.5px; font-weight:600; }
   .sync-badge-on{ background:var(--success-soft); color:var(--success); }
   .sync-badge-off{ background:var(--surface-alt); color:var(--ink-faint); }
+
+  /* Danh sách dạng hàng: icon tròn + tiêu đề + mô tả + trạng thái + nút bo tròn (pill) */
+  .data-card{ background:#F0F5EE; border:1px solid #DDE7D9; border-radius:16px; padding:6px 20px; margin-bottom:18px; }
+  .data-row{ display:flex; align-items:center; gap:16px; padding:18px 0; border-bottom:1px solid #DDE7D9; flex-wrap:wrap; }
+  .data-row:last-child{ border-bottom:none; }
+  .data-row-icon{ width:46px; height:46px; border-radius:13px; display:flex; align-items:center; justify-content:center; font-size:21px; flex-shrink:0; }
+  .data-row-icon.peach{ background:#FBE3D5; }
+  .data-row-icon.blue{ background:#DCE7FB; }
+  .data-row-body{ flex:1; min-width:200px; }
+  .data-row-title{ font-family:'Baloo 2',sans-serif; font-weight:700; font-size:17px; color:var(--ink); }
+  .data-row-desc{ font-size:13.5px; color:var(--ink-soft); margin-top:3px; line-height:1.5; }
+  .data-row-status{ font-size:13px; font-weight:700; margin-top:7px; }
+  .data-row-status.warn{ color:#C2792E; }
+  .data-row-status.ok{ color:var(--success); }
+  .data-row-status.off{ color:var(--ink-faint); }
+  .pill-btn{ border-radius:999px; padding:11px 22px; font-weight:700; font-size:14.5px; border:none; cursor:pointer; white-space:nowrap; display:inline-flex; align-items:center; gap:6px; transition:transform .18s cubic-bezier(.22,1,.36,1), opacity .18s ease; font-family:'Be Vietnam Pro',sans-serif; }
+  .pill-btn:active{ transform:scale(.94); opacity:.85; }
+  .pill-btn-solid{ background:var(--accent); color:#fff; }
+  .pill-btn-outline{ background:#fff; border:1.5px solid #DDE7D9; color:var(--ink); }
+  .sync-detail-panel{ background:#fff; border:1px solid #DDE7D9; border-radius:12px; padding:16px; margin:0 0 16px; }
+
   .warn-banner{ display:flex; gap:12px; align-items:flex-start; background:var(--danger-soft); border:1px solid #E8C3BE; border-radius:var(--radius); padding:14px 16px; margin-bottom:12px; }
   .warn-banner .dot{ width:9px;height:9px; border-radius:50%; background:var(--danger); margin-top:5px; flex-shrink:0; }
   .warn-title{ font-weight:700; font-size:16px; }
@@ -299,10 +320,15 @@ function parseFirebaseConfigInput(text){
   const end = text.lastIndexOf('}');
   if(start===-1 || end===-1 || end<start) return null;
   const objText = text.slice(start, end+1);
-  try{
-    const obj = new Function('return (' + objText + ')')();
-    if(obj && typeof obj==='object' && obj.apiKey && obj.projectId) return obj;
-  }catch(e){}
+  // Đọc từng dòng dạng  key: "value"  bằng regex — không dùng eval/new Function
+  // (một số trình duyệt/tiện ích mở rộng chặn eval vì lý do bảo mật).
+  const obj = {};
+  const re = /["']?([A-Za-z0-9_]+)["']?\s*:\s*["']([^"']+)["']/g;
+  let m;
+  while((m = re.exec(objText)) !== null){
+    obj[m[1]] = m[2];
+  }
+  if(obj.apiKey && obj.projectId) return obj;
   return null;
 }
 
@@ -334,6 +360,18 @@ function setSyncCode(code){
 function clearSyncCode(){
   try{ localStorage.removeItem('edutrack_sync_code'); }catch(e){}
 }
+function getLastBackupAt(){ try{ return localStorage.getItem('edutrack_last_backup_at'); }catch(e){ return null; } }
+function setLastBackupAt(){ try{ localStorage.setItem('edutrack_last_backup_at', new Date().toISOString()); }catch(e){} }
+function getLastSyncAt(){ try{ return localStorage.getItem('edutrack_last_sync_at'); }catch(e){ return null; } }
+function setLastSyncAt(){ try{ localStorage.setItem('edutrack_last_sync_at', new Date().toISOString()); }catch(e){} }
+function fmtDateTimeVN(iso){
+  if(!iso) return '';
+  const d = new Date(iso);
+  const hh = String(d.getHours()).padStart(2,'0'), mm = String(d.getMinutes()).padStart(2,'0');
+  const dateKey = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+  const isToday = dateKey === todayISO();
+  return isToday ? `${hh}:${mm}` : `${hh}:${mm} · ${fmtDateVN(dateKey)}`;
+}
 function firebaseReady(){ return !!firestoreDB; }
 function syncActive(){ return firebaseReady() && !!getSyncCode(); }
 
@@ -341,27 +379,50 @@ function firestoreKvCollection(){
   const code = getSyncCode();
   return firestoreDB.collection('edutrack_sync').doc(code).collection('kv');
 }
+// Không bao giờ để 1 thao tác Firestore treo vô thời hạn — quá 8 giây thì tự
+// coi như thất bại (trả về giá trị mặc định) để trang luôn hiện lên được,
+// dù Firestore chưa bật đúng hay mạng có vấn đề.
+let _firestoreTimedOutOnce = false;
+function withTimeout(promise, ms, fallback){
+  return new Promise((resolve)=>{
+    let done = false;
+    const timer = setTimeout(()=>{
+      if(done) return;
+      done = true;
+      if(!_firestoreTimedOutOnce){
+        _firestoreTimedOutOnce = true;
+        showToast('Không kết nối được tới Firestore (quá thời gian chờ) — kiểm tra lại Firestore Database đã bật chưa.', 5000);
+      }
+      resolve(fallback);
+    }, ms);
+    promise.then((v)=>{ if(!done){ done=true; clearTimeout(timer); resolve(v); } })
+           .catch(()=>{ if(!done){ done=true; clearTimeout(timer); resolve(fallback); } });
+  });
+}
 const firestoreBackend = {
   async get(key, shared){
     try{
-      const snap = await firestoreKvCollection().doc(key).get();
-      if(!snap.exists) return null;
+      const snap = await withTimeout(firestoreKvCollection().doc(key).get(), 8000, null);
+      if(!snap || !snap.exists) return null;
       return {key, value: snap.data().value, shared: !!shared};
     }catch(e){ return null; }
   },
   async set(key, value, shared){
     try{
-      await firestoreKvCollection().doc(key).set({value, updatedAt: Date.now()});
-      return {key, value, shared: !!shared};
+      const ok = await withTimeout(firestoreKvCollection().doc(key).set({value, updatedAt: Date.now()}).then(()=>true), 8000, false);
+      return ok ? {key, value, shared: !!shared} : null;
     }catch(e){ return null; }
   },
   async delete(key, shared){
-    try{ await firestoreKvCollection().doc(key).delete(); return {key, deleted:true, shared: !!shared}; }
-    catch(e){ return null; }
+    try{
+      const ok = await withTimeout(firestoreKvCollection().doc(key).delete().then(()=>true), 8000, false);
+      return ok ? {key, deleted:true, shared: !!shared} : null;
+    }catch(e){ return null; }
   },
   async list(prefix, shared){
     try{
-      const snaps = await firestoreKvCollection().get();
+      const snaps = await withTimeout(firestoreKvCollection().get(), 8000, null);
+      if(!snaps) return {keys:[], prefix, shared: !!shared};
       const keys = [];
       snaps.forEach(doc=>{ if(!prefix || doc.id.startsWith(prefix)) keys.push(doc.id); });
       return {keys, prefix, shared: !!shared};
@@ -404,6 +465,7 @@ const state = {
   records: { list:[], search:'', filterType:'', dateFrom:'', dateTo:'', editingId:null, prompts:{}, formClassId:'', formStudentIds:[] },
   dailyTasks: {}, // { 'YYYY-MM-DD': { taskId: true } } — các việc đã tick xong theo từng ngày
   dailyTaskTemplates: [], // [{id, title}] — danh sách việc lặp lại mỗi ngày, tự nạp/seed khi khởi động
+  syncPanelOpen: false,
   loaded:false,
   modal:null, // {type:'prompt'|'confirm', title, value, danger, onSubmit}
   teacherName: '',
@@ -425,7 +487,11 @@ async function storageGet(key){
   catch(e){ return null; }
 }
 async function storageSetRaw(key, value){
-  try{ const r = await activeBackend().set(key, value, true); return !!r; }
+  try{
+    const r = await activeBackend().set(key, value, true);
+    if(r && syncActive()) setLastSyncAt();
+    return !!r;
+  }
   catch(e){ return false; }
 }
 // Lưu có tự thử lại 1 lần nếu lần đầu thất bại (thường do bị giới hạn tần suất khi lưu quá nhanh liên tục)
@@ -474,11 +540,12 @@ async function loadAll(){
   try{
     const list = await activeBackend().list('sessions_', true);
     if(list && list.keys){
-      for(const k of list.keys){
+      const entries = await Promise.all(list.keys.map(async (k)=>{
         const classId = k.slice('sessions_'.length);
         const raw = await storageGet(k);
-        state.sessionsByClass[classId] = raw ? JSON.parse(raw) : [];
-      }
+        return [classId, raw ? JSON.parse(raw) : []];
+      }));
+      entries.forEach(([classId, sessions])=>{ state.sessionsByClass[classId] = sessions; });
     }
   }catch(e){ /* no sessions yet */ }
   const tName = await storageGet('teacherName');
@@ -515,18 +582,23 @@ function exportBackup(){
   a.download = `EduTrack-Backup-${todayISO()}.json`;
   document.body.appendChild(a); a.click(); document.body.removeChild(a);
   URL.revokeObjectURL(url);
+  setLastBackupAt();
   showToast('Đã xuất file sao lưu.');
 }
 
 async function pushAllToFirestore(){
-  await firestoreBackend.set('classes', JSON.stringify(state.classes), true);
-  for(const classId of Object.keys(state.sessionsByClass)){
-    await firestoreBackend.set('sessions_'+classId, JSON.stringify(state.sessionsByClass[classId]||[]), true);
-  }
-  await firestoreBackend.set('teacherName', state.teacherName || '', true);
-  await firestoreBackend.set('dailyTasks', JSON.stringify(state.dailyTasks||{}), true);
-  await firestoreBackend.set('dailyTaskTemplates', JSON.stringify(state.dailyTaskTemplates||[]), true);
-  await firestoreBackend.set('records', JSON.stringify(state.records.list||[]), true);
+  const tasks = [
+    firestoreBackend.set('classes', JSON.stringify(state.classes), true),
+    firestoreBackend.set('teacherName', state.teacherName || '', true),
+    firestoreBackend.set('dailyTasks', JSON.stringify(state.dailyTasks||{}), true),
+    firestoreBackend.set('dailyTaskTemplates', JSON.stringify(state.dailyTaskTemplates||[]), true),
+    firestoreBackend.set('records', JSON.stringify(state.records.list||[]), true),
+  ];
+  Object.keys(state.sessionsByClass).forEach(classId=>{
+    tasks.push(firestoreBackend.set('sessions_'+classId, JSON.stringify(state.sessionsByClass[classId]||[]), true));
+  });
+  const results = await Promise.all(tasks);
+  return results.every(r=>r!==null);
 }
 
 function importBackup(file){
@@ -978,8 +1050,30 @@ function renderHome(){
         </div>`).join('')}
     </div>
 
-    <div class="card sync-card">
-      <div class="card-title">☁️ Đồng bộ &amp; Sao lưu dữ liệu</div>
+    <div class="data-card">
+      <div class="data-row">
+        <div class="data-row-icon peach">💾</div>
+        <div class="data-row-body">
+          <div class="data-row-title">Xuất toàn bộ dữ liệu (backup)</div>
+          <div class="data-row-desc">Tải về 1 file duy nhất chứa toàn bộ dữ liệu — nên làm định kỳ để phòng rủi ro mất dữ liệu, không phụ thuộc hoàn toàn vào trình duyệt.</div>
+          <div class="data-row-status ${getLastBackupAt()?'ok':'warn'}">${getLastBackupAt()? '✓ Đã sao lưu · '+fmtDateTimeVN(getLastBackupAt()) : '⚠ Bạn chưa sao lưu lần nào'}</div>
+          <div class="tiny" style="margin-top:6px;"><span style="text-decoration:underline;cursor:pointer;color:var(--ink-soft);" data-action="trigger-backup-import">⬆ Khôi phục từ file đã sao lưu</span></div>
+        </div>
+        <button class="pill-btn pill-btn-solid" data-action="export-backup">⬇ Xuất ngay</button>
+      </div>
+
+      <div class="data-row">
+        <div class="data-row-icon blue">🔄</div>
+        <div class="data-row-body">
+          <div class="data-row-title">Đồng bộ đa thiết bị</div>
+          <div class="data-row-status ${syncActive()?'ok':'off'}">${syncActive()? '🟢 Đã đồng bộ'+(getLastSyncAt()? ' · '+fmtDateTimeVN(getLastSyncAt()) : '') : (firebaseReady()? '⚪ Chưa kết nối' : '⚪ Chưa cấu hình')}</div>
+        </div>
+        <button class="pill-btn pill-btn-outline" data-action="toggle-sync-panel">${state.syncPanelOpen? 'Thu gọn' : 'Xem/Sửa'}</button>
+      </div>
+    </div>
+
+    ${state.syncPanelOpen ? `
+    <div class="sync-detail-panel">
       ${firebaseReady() ? (
         syncActive() ? `
         <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:8px;">
@@ -1004,11 +1098,7 @@ function renderHome(){
           <button class="btn btn-accent btn-sm" data-action="save-firebase-config">💾 Lưu cấu hình</button>
         </div>
       `}
-      <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:14px; padding-top:14px; border-top:1px solid var(--line);">
-        <button class="btn btn-outline btn-sm" data-action="export-backup">⬇ Sao lưu ra file</button>
-        <button class="btn btn-outline btn-sm" data-action="trigger-backup-import">⬆ Khôi phục từ file</button>
-      </div>
-    </div>
+    </div>` : ''}
 
     <div class="grid-3" style="margin-bottom:18px;">
       <div class="card" style="margin-bottom:0;"><div class="stat-num">${state.classes.length}</div><div class="stat-label">Lớp học</div></div>
@@ -4110,6 +4200,7 @@ async function handleAction(action, elx, e){
       render();
       break;
     }
+    case 'toggle-sync-panel': state.syncPanelOpen = !state.syncPanelOpen; render(); break;
     case 'save-firebase-config': {
       const ta = document.getElementById('firebase-config-input');
       const text = ta ? ta.value : '';
@@ -4138,22 +4229,35 @@ async function handleAction(action, elx, e){
       const code = inp ? inp.value.trim() : '';
       if(!code){ showToast('Nhập mã đồng bộ nhé.'); break; }
       setSyncCode(code);
-      showToast('Đang kết nối...', 2000);
+      showToast('Đang kết nối...', 3000);
       (async ()=>{
-        const existing = await firestoreBackend.get('classes', true);
-        const hasCloudData = existing && existing.value && JSON.parse(existing.value).length;
-        if(!hasCloudData && state.classes.length){
-          openConfirmModal('Mã đồng bộ này chưa có dữ liệu trên đám mây. Tải toàn bộ dữ liệu hiện có trên máy này lên để bắt đầu đồng bộ?', false, async ()=>{
-            await pushAllToFirestore();
-            await loadAll();
-            render();
-            showToast('Đã tải dữ liệu lên và bắt đầu đồng bộ.');
-          });
-          return;
+        try{
+          const existing = await firestoreBackend.get('classes', true);
+          const hasCloudData = existing && existing.value && JSON.parse(existing.value).length;
+          if(!hasCloudData && state.classes.length){
+            openConfirmModal('Mã đồng bộ này chưa có dữ liệu trên đám mây. Tải toàn bộ dữ liệu hiện có trên máy này lên để bắt đầu đồng bộ?', false, async ()=>{
+              try{
+                showToast('Đang tải dữ liệu lên đám mây, chờ chút nhé...', 6000);
+                const ok = await pushAllToFirestore();
+                await loadAll();
+                if(ok) setLastSyncAt();
+                showToast(ok ? 'Đã tải dữ liệu lên và bắt đầu đồng bộ.' : 'Tải lên chưa trọn vẹn — kiểm tra lại Rules trên Firestore rồi thử lại.', 4500);
+              }catch(e){
+                showToast('Có lỗi khi tải dữ liệu lên — cô kiểm tra lại kết nối mạng và Firestore Rules nhé.', 4500);
+              }finally{
+                render();
+              }
+            });
+            return;
+          }
+          await loadAll();
+          setLastSyncAt();
+          showToast('Đã kết nối đồng bộ.');
+        }catch(e){
+          showToast('Không kết nối được — kiểm tra lại cấu hình Firebase và Rules trên Firestore.', 4500);
+        }finally{
+          render();
         }
-        await loadAll();
-        render();
-        showToast('Đã kết nối đồng bộ.');
       })();
       break;
     }
@@ -5035,6 +5139,7 @@ async function handleAction(action, elx, e){
 ============================================================ */
 (async function init(){
   await loadAll();
+  state.syncPanelOpen = !syncActive();
   render();
 })();
 
