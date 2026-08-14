@@ -332,14 +332,20 @@ function parseFirebaseConfigInput(text){
   return null;
 }
 
-const FIREBASE_CONFIG = loadStoredFirebaseConfig() || {
-  apiKey: "",
-  authDomain: "",
-  projectId: "",
-  storageBucket: "",
-  messagingSenderId: "",
-  appId: ""
+// Cấu hình Firebase mặc định của lớp cô (không phải thông tin bí mật — khoá "apiKey"
+// của Firebase web app vốn được thiết kế để công khai, việc bảo mật thật sự nằm ở
+// Rules trên Firestore, không nằm ở việc giấu đoạn cấu hình này).
+// Nhúng sẵn ở đây để MỌI thiết bị mở file đều tự nhận dạng ngay, không cần dán lại
+// config trên từng máy — chỉ cần nhập đúng "Mã đồng bộ" một lần trên mỗi thiết bị.
+const DEFAULT_FIREBASE_CONFIG = {
+  apiKey: "AIzaSyDwDUR7WK6nxcBsgpdhx2UjAcWWzRj3Xnk",
+  authDomain: "edutrack-6767.firebaseapp.com",
+  projectId: "edutrack-6767",
+  storageBucket: "edutrack-6767.firebasestorage.app",
+  messagingSenderId: "354187277131",
+  appId: "1:354187277131:web:4c9ec21cffbff4a1e2eece"
 };
+const FIREBASE_CONFIG = loadStoredFirebaseConfig() || DEFAULT_FIREBASE_CONFIG;
 
 let firestoreDB = null;
 try{
@@ -4215,10 +4221,10 @@ async function handleAction(action, elx, e){
       break;
     }
     case 'reset-firebase-config': {
-      openConfirmModal('Xoá cấu hình Firebase hiện tại? Cô sẽ cần dán lại cấu hình (mới hoặc cũ) để tiếp tục đồng bộ.', true, ()=>{
+      openConfirmModal('Đổi/xoá cấu hình Firebase đang dùng riêng trên thiết bị này? Sẽ quay về cấu hình mặc định của lớp (nếu có), và cần nhập lại mã đồng bộ.', true, ()=>{
         clearStoredFirebaseConfig();
         clearSyncCode();
-        showToast('Đã xoá cấu hình — đang tải lại trang...', 2000);
+        showToast('Đã đặt lại cấu hình — đang tải lại trang...', 2000);
         setTimeout(()=> location.reload(), 1000);
       });
       break;
