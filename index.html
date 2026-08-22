@@ -1727,45 +1727,9 @@ function renderReport(){
   }
 
   const st = cls.students.find(s=>s.id===studentId);
-  const att = studentAttendanceStats(classId, studentId);
-  const series = studentScoreSeries(classId, studentId);
-  const avgScore = series.length? (series.reduce((a,b)=>a+b.score,0)/series.length) : null;
-  const avgClass = series.length? (series.filter(s=>s.classAvg!==null).reduce((a,b,_,arr)=>a+b.classAvg/arr.length,0)) : null;
-  const ratings = getSessions(classId).map(s=>s.rating[studentId]).filter(r=>r);
-  const avgRating = ratings.length? (ratings.reduce((a,b)=>a+b,0)/ratings.length) : null;
-  const cl = studentChecklistStats(classId, studentId);
   const remark = generateRemark(classId, studentId);
-
-  const chartSvg = series.length ? lineChartSVG(
-    series.map(s=>fmtDateVN(s.date)),
-    [
-      {name:esc(st.name), color:'var(--accent-deep)', values: series.map(s=>s.score)},
-      {name:'Trung bình lớp', color:'var(--ink-faint)', dash:'5,4', values: series.map(s=>s.classAvg)},
-    ]
-  ) : `<div class="muted">Chưa có dữ liệu điểm để vẽ biểu đồ.</div>`;
-
-  // Lịch sử: mỗi buổi so với đúng buổi liền trước nó (mới nhất lên đầu)
   const allSessions = getSessions(classId);
   const attLabel = (s) => s==='present'?'Có mặt': s==='absent'?'Vắng': s==='late'?'Muộn':'—';
-  const attColor = (s) => s==='present'?'var(--success)': s==='absent'?'var(--danger)': s==='late'?'var(--late)':'var(--ink-soft)';
-  const studentHistoryRows = allSessions.map((s,i)=>{
-    const prev = i>0 ? allSessions[i-1] : null;
-    const score = sessionScoreAvg(s, studentId);
-    const prevScore = prev ? sessionScoreAvg(prev, studentId) : null;
-    const attStatus = s.attendance[studentId] || null;
-    const prevAttStatus = prev ? (prev.attendance[studentId] || null) : null;
-    const hw = checklistFromSessions([s], studentId).rate;
-    const prevHw = prev ? checklistFromSessions([prev], studentId).rate : null;
-    return {
-      date: s.date,
-      score, dScore: (score!==null && prevScore!==null) ? score-prevScore : null,
-      attStatus, prevAttStatus,
-      hw, dHw: (hw!==null && prevHw!==null) ? hw-prevHw : null,
-    };
-  }).reverse();
-  const studentHistoryShown = studentHistoryRows.slice(0, 12);
-  const lastStRow = studentHistoryRows[0] || null;
-  const prevStRow = studentHistoryRows[1] || null;
 
   return `
     <div class="topbar no-print">
@@ -1789,74 +1753,45 @@ function renderReport(){
         </div>
       </div>
 
-      <div class="grid-4" style="margin-bottom:18px;">
-        <div class="stat-box"><div class="stat-num">${att.rate!==null? att.rate+'%':'—'}</div><div class="stat-label">Tỷ lệ chuyên cần (toàn bộ)</div></div>
-        <div class="stat-box"><div class="stat-num">${avgScore!==null? avgScore.toFixed(1):'—'}</div><div class="stat-label">Điểm TB các buổi (toàn bộ)</div></div>
-        <div class="stat-box"><div class="stat-num">${avgRating!==null? avgRating.toFixed(1)+'/5':'—'}</div><div class="stat-label">Đánh giá TB buổi học</div></div>
-        <div class="stat-box"><div class="stat-num">${cl.rate!==null? cl.rate+'%':'—'}</div><div class="stat-label">Hoàn thành bài tập (toàn bộ)</div></div>
-      </div>
-
-      ${lastStRow ? `
-      <h3 style="font-size:16.5px;margin-bottom:10px;">🔍 Buổi gần nhất (${fmtDateVN(lastStRow.date)}) so với buổi trước${prevStRow? ' ('+fmtDateVN(prevStRow.date)+')' : ''}</h3>
-      <table style="margin-bottom:22px;">
-        <thead><tr><th>Chỉ số</th><th style="text-align:center;">Buổi trước</th><th style="text-align:center;">Buổi này</th><th style="text-align:center;">Thay đổi</th></tr></thead>
+      ${allSessions.length ? `
+      <div style="overflow-x:auto;">
+      <table style="min-width:840px;">
+        <thead><tr>
+          <th style="width:40px;text-align:center;">Stt</th>
+          <th style="width:95px;">Ngày</th>
+          <th>Nội dung học</th>
+          <th>BTVN</th>
+          <th style="width:75px;text-align:center;">Điểm TB</th>
+          <th style="width:80px;text-align:center;">Ý thức</th>
+          <th>Nhận xét / Ghi chú</th>
+          <th class="no-print" style="width:70px;text-align:center;">Chỉnh sửa</th>
+        </tr></thead>
         <tbody>
-          <tr class="ledger">
-            <td>Điểm buổi học</td>
-            <td class="mono" style="text-align:center;">${prevStRow && prevStRow.score!==null? prevStRow.score.toFixed(1) : '—'}</td>
-            <td class="mono" style="text-align:center;font-weight:700;">${lastStRow.score!==null? lastStRow.score.toFixed(1) : '—'}</td>
-            <td class="mono" style="text-align:center;color:${trendColor(lastStRow.dScore)};">${lastStRow.dScore!==null? trendArrow(lastStRow.dScore)+(lastStRow.dScore>=0?'+':'')+lastStRow.dScore.toFixed(1) : '—'}</td>
-          </tr>
-          <tr class="ledger">
-            <td>Điểm danh</td>
-            <td class="mono" style="text-align:center;color:${attColor(prevStRow?prevStRow.attStatus:null)};">${prevStRow? attLabel(prevStRow.attStatus) : '—'}</td>
-            <td class="mono" style="text-align:center;font-weight:700;color:${attColor(lastStRow.attStatus)};">${attLabel(lastStRow.attStatus)}</td>
-            <td class="mono" style="text-align:center;">—</td>
-          </tr>
-          <tr class="ledger">
-            <td>Hoàn thành bài tập buổi đó</td>
-            <td class="mono" style="text-align:center;">${prevStRow && prevStRow.hw!==null? prevStRow.hw+'%' : '—'}</td>
-            <td class="mono" style="text-align:center;font-weight:700;">${lastStRow.hw!==null? lastStRow.hw+'%' : '—'}</td>
-            <td class="mono" style="text-align:center;color:${trendColor(lastStRow.dHw)};">${lastStRow.dHw!==null? trendArrow(lastStRow.dHw)+(lastStRow.dHw>=0?'+':'')+lastStRow.dHw+'%' : '—'}</td>
-          </tr>
+        ${allSessions.map((s,i)=>{
+          const attStatus = s.attendance[studentId] || null;
+          const isAbsent = attStatus==='absent';
+          const rating = s.rating[studentId] || 5;
+          const scoreAvg = sessionScoreAvg(s, studentId);
+          // Gộp ghi chú riêng của em + nhận xét nền nếp chung của buổi (2 ô "Ghi chú" trong tab Buổi học)
+          const noteParts = [];
+          if(s.studentNotes[studentId]) noteParts.push(s.studentNotes[studentId]);
+          if(s.disciplineNote) noteParts.push(s.disciplineNote);
+          const note = noteParts.join(' — ');
+          return `<tr class="ledger">
+            <td class="mono" style="text-align:center;">${i+1}</td>
+            <td class="mono">${fmtDateVN(s.date)}</td>
+            <td class="note-text">${esc(s.content||'—')}</td>
+            <td class="note-text">${esc(s.homework||'—')}</td>
+            <td class="mono" style="text-align:center;">${scoreAvg!==null? scoreAvg.toFixed(1) : '—'}</td>
+            <td style="text-align:center;">${isAbsent ? `<span style="color:var(--danger);font-weight:700;">Vắng</span>` : `<span class="mono">${rating}/5</span>`}</td>
+            <td class="note-text">${esc(note||'—')}</td>
+            <td class="no-print" style="text-align:center;"><button class="btn btn-outline btn-sm" data-action="goto-session-date" data-class="${classId}" data-date="${s.date}">✎ Sửa</button></td>
+          </tr>`;
+        }).join('')}
         </tbody>
       </table>
-
-      <h3 style="font-size:16.5px;margin-bottom:10px;">📈 Biến động qua từng buổi ${studentHistoryRows.length>12? '<span class="tiny">(12 buổi gần nhất)</span>':''}</h3>
-      <table style="margin-bottom:22px;">
-        <thead><tr><th>Ngày</th><th style="text-align:center;">Điểm danh</th><th style="text-align:center;">Điểm</th><th style="text-align:center;">Δ điểm</th><th style="text-align:center;">Hoàn thành BT</th><th style="text-align:center;">Δ BT</th></tr></thead>
-        <tbody>
-        ${studentHistoryShown.map(r=>`
-          <tr class="ledger">
-            <td>${fmtDateVN(r.date)}</td>
-            <td class="mono" style="text-align:center;color:${attColor(r.attStatus)};">${attLabel(r.attStatus)}</td>
-            <td class="mono" style="text-align:center;">${r.score!==null? r.score.toFixed(1) : '—'}</td>
-            <td class="mono" style="text-align:center;color:${trendColor(r.dScore)};">${r.dScore!==null? trendArrow(r.dScore)+(r.dScore>=0?'+':'')+r.dScore.toFixed(1) : '—'}</td>
-            <td class="mono" style="text-align:center;">${r.hw!==null? r.hw+'%' : '—'}</td>
-            <td class="mono" style="text-align:center;color:${trendColor(r.dHw)};">${r.dHw!==null? trendArrow(r.dHw)+(r.dHw>=0?'+':'')+r.dHw+'%' : '—'}</td>
-          </tr>`).join('')}
-        </tbody>
-      </table>` : ''}
-
-      <h3 style="font-size:16.5px;margin-bottom:10px;">Nền nếp (toàn bộ)</h3>
-      <table style="margin-bottom:18px;"><tbody>
-        <tr class="ledger"><td>Số buổi có mặt</td><td class="mono">${att.present}</td></tr>
-        <tr class="ledger"><td>Số buổi vắng</td><td class="mono">${att.absent}</td></tr>
-        <tr class="ledger"><td>Số buổi đi muộn</td><td class="mono">${att.late}</td></tr>
-        <tr class="ledger"><td>So với điểm trung bình lớp</td><td class="mono">${avgClass!==null? (avgScore-avgClass>=0?'+':'')+(avgScore-avgClass).toFixed(1) : '—'}</td></tr>
-      </tbody></table>
-
-      <h3 style="font-size:16.5px;margin-bottom:10px;">Hoàn thành bài tập (checklist trên lớp, toàn bộ)</h3>
-      <table style="margin-bottom:18px;"><tbody>
-        <tr class="ledger"><td>Số lượt làm đầy đủ</td><td class="mono">${cl.full}</td></tr>
-        <tr class="ledger"><td>Số lượt làm chưa đầy đủ (thiếu)</td><td class="mono">${cl.partial}</td></tr>
-        <tr class="ledger ${cl.none>0?'flagged':''}"><td>Số lượt chưa làm</td><td class="mono">${cl.none}</td></tr>
-        <tr class="ledger"><td>Tổng số lượt bài tập được giao</td><td class="mono">${cl.total}</td></tr>
-      </tbody></table>
-
-      <h3 style="font-size:16.5px;margin-bottom:10px;">Diễn biến điểm số qua các buổi</h3>
-      <div style="margin-bottom:8px;">${chartSvg}</div>
-      <div class="legend"><span><i style="background:var(--accent-deep);"></i>${esc(st.name)}</span><span><i style="background:var(--ink-faint);"></i>Trung bình lớp</span></div>
+      </div>
+      ` : `<div class="muted">Chưa có buổi học nào được ghi nhận cho lớp này.</div>`}
 
       <h3 style="font-size:16.5px;margin:18px 0 10px;">Nhận xét</h3>
       <div class="remark-box">${esc(remark)}</div>
@@ -4317,6 +4252,13 @@ async function handleAction(action, elx, e){
     case 'goto-session-class': {
       state.currentClassId = elx.dataset.class;
       state.session.date = todayISO();
+      state.tab = 'session';
+      render();
+      break;
+    }
+    case 'goto-session-date': {
+      state.currentClassId = elx.dataset.class;
+      state.session.date = elx.dataset.date;
       state.tab = 'session';
       render();
       break;
