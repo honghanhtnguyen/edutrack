@@ -1337,21 +1337,30 @@ function renderSession(){
             ${exercises.length? `<button class="btn btn-danger-outline btn-sm" data-action="reset-scores">↺ Đặt lại điểm buổi này</button>`:''}
           </div>
         </div>
-        <div class="muted" style="margin-bottom:10px;">Checklist: bấm ô để chuyển Chưa làm → Làm thiếu → Đầy đủ. Cuộn ngang nếu bảng rộng hơn màn hình — cột "Học sinh" luôn cố định.</div>
+        <div class="muted" style="margin-bottom:10px;">Checklist: bấm ô để chuyển Chưa làm → Làm thiếu → Đầy đủ. Dùng nút "Tick tất cả" ở tiêu đề cột để làm nhanh cả lớp, rồi chỉnh lại từng em ngoại lệ. Cuộn ngang nếu bảng rộng hơn màn hình — cột "Học sinh" luôn cố định.</div>
         <div style="overflow-x:auto;">
         <table class="session-table" style="min-width:${560 + (types.length+exercises.length)*90}px;">
           <thead>
             <tr>
               <th rowspan="2" style="min-width:130px;">Học sinh</th>
-              <th rowspan="2" style="min-width:150px;">Điểm danh</th>
+              <th rowspan="2" style="min-width:150px;">
+                Điểm danh<br>
+                <button class="btn btn-outline btn-sm" data-action="tick-all-attendance" style="margin-top:4px;font-size:10.5px;padding:3px 7px;font-weight:600;text-transform:none;letter-spacing:0;">✓ Tất cả có mặt</button>
+              </th>
               ${types.length? `<th colspan="${types.length}" style="text-align:center;">Checklist bài tập</th>` : ''}
               ${exercises.length? `<th colspan="${exercises.length}" style="text-align:center;">Điểm luyện tập</th>` : ''}
-              <th rowspan="2" style="min-width:150px;">Đánh giá</th>
+              <th rowspan="2" style="min-width:150px;">
+                Đánh giá<br>
+                <button class="btn btn-outline btn-sm" data-action="tick-all-rating" style="margin-top:4px;font-size:10.5px;padding:3px 7px;font-weight:600;text-transform:none;letter-spacing:0;">5★ tất cả</button>
+              </th>
               <th rowspan="2" style="min-width:130px;">📌 Chép phạt</th>
               <th rowspan="2" style="min-width:170px;">Ghi chú riêng</th>
             </tr>
             <tr>
-              ${types.map(t=>`<th style="text-align:center;min-width:80px;">${esc(t.name)}</th>`).join('')}
+              ${types.map(t=>`<th style="text-align:center;min-width:80px;">
+                ${esc(t.name)}<br>
+                <button class="btn btn-outline btn-sm" data-action="tick-all-checklist" data-type="${t.id}" style="margin-top:4px;font-size:10.5px;padding:3px 6px;font-weight:600;text-transform:none;letter-spacing:0;">✓ Đủ tất cả</button>
+              </th>`).join('')}
               ${exercises.map(e=>`<th style="text-align:center;min-width:90px;">${esc(e.name)}<div class="tiny" style="text-transform:none;letter-spacing:0;">(${exerciseTotal(e)} câu)</div></th>`).join('')}
             </tr>
           </thead>
@@ -4032,15 +4041,37 @@ function exportExcel(){
   const selectedMonth = state.attendance.month || 'all';
   const allSessions = getSessions(classId);
   const sessions = selectedMonth==='all' ? allSessions : allSessions.filter(s=>monthKey(s.date)===selectedMonth);
-  const rows = [['Học sinh','Số buổi có dữ liệu','Có mặt','Vắng','Muộn','Tỷ lệ chuyên cần (%)']];
+
+  const dayHeaders = sessions.map(s=>fmtDateVN(s.date));
+  const header = ['Học sinh', ...dayHeaders, 'Số buổi có dữ liệu', 'Có mặt', 'Vắng', 'Muộn', 'Tỷ lệ chuyên cần (%)'];
+  const rows = [header];
   cls.students.forEach(s=>{
     const att = attendanceFromSessions(sessions, s.id);
-    rows.push([s.name, att.total, att.present, att.absent, att.late, att.rate!==null?att.rate:'']);
+    const dayCells = sessions.map(sess=>{
+      const a = sess.attendance[s.id];
+      if(a==='present') return 'X';
+      if(a==='absent') return 'V';
+      if(a==='late') return 'M';
+      return '';
+    });
+    rows.push([s.name, ...dayCells, att.total, att.present, att.absent, att.late, att.rate!==null?att.rate:'']);
   });
+
   const ws = XLSX.utils.aoa_to_sheet(rows);
   const wb = XLSX.utils.book_new();
   const sheetLabel = (selectedMonth==='all' ? 'Chuyen can' : monthLabel(selectedMonth)).slice(0,30);
   XLSX.utils.book_append_sheet(wb, ws, sheetLabel);
+
+  // Thêm sheet chú thích ký hiệu cho dễ đọc
+  const legendWs = XLSX.utils.aoa_to_sheet([
+    ['Ký hiệu', 'Ý nghĩa'],
+    ['X', 'Có mặt'],
+    ['V', 'Vắng'],
+    ['M', 'Muộn'],
+    ['(để trống)', 'Chưa điểm danh buổi đó'],
+  ]);
+  XLSX.utils.book_append_sheet(wb, legendWs, 'Chú thích');
+
   const fileMonthPart = selectedMonth==='all' ? '' : `-${selectedMonth}`;
   XLSX.writeFile(wb, `Chuyen-can-${cls.name.replace(/\s+/g,'_')}${fileMonthPart}.xlsx`);
   showToast('Đã xuất file Excel.');
@@ -4393,6 +4424,31 @@ async function handleAction(action, elx, e){
       const sess = ensureSessionEditable();
       sess.attendance[elx.dataset.student] = elx.dataset.value;
       render(); saveSessions(state.currentClassId);
+      break;
+    }
+    case 'tick-all-attendance': {
+      const sess = ensureSessionEditable();
+      getStudents(state.currentClassId).forEach(st=>{ sess.attendance[st.id] = 'present'; });
+      render(); saveSessions(state.currentClassId);
+      showToast('Đã tick cả lớp là Có mặt.');
+      break;
+    }
+    case 'tick-all-checklist': {
+      const sess = ensureSessionEditable();
+      const typeId = elx.dataset.type;
+      getStudents(state.currentClassId).forEach(st=>{
+        if(!sess.checklist[st.id]) sess.checklist[st.id] = {};
+        sess.checklist[st.id][typeId] = 'full';
+      });
+      render(); saveSessions(state.currentClassId);
+      showToast('Đã tick cả lớp là Đầy đủ.');
+      break;
+    }
+    case 'tick-all-rating': {
+      const sess = ensureSessionEditable();
+      getStudents(state.currentClassId).forEach(st=>{ sess.rating[st.id] = 5; });
+      render(); saveSessions(state.currentClassId);
+      showToast('Đã đặt đánh giá cả lớp về 5★.');
       break;
     }
     case 'add-extype': {
