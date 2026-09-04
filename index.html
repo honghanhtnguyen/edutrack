@@ -474,6 +474,9 @@ const state = {
   dailyTaskTemplates: [], // [{id, title}] — danh sách việc lặp lại mỗi ngày, tự nạp/seed khi khởi động
   syncPanelOpen: false,
   syncShowConfigForm: false,
+  teamsMonth: null,
+  teamsPrompts: {},
+  classTeamsPrompt: '',
   loaded:false,
   modal:null, // {type:'prompt'|'confirm', title, value, danger, onSubmit}
   teacherName: '',
@@ -2727,19 +2730,18 @@ function renderViolationsSection(classId, cls){
         </div>
         <div style="border:1px solid var(--line); border-radius:8px; padding:14px; margin-bottom:18px; background:var(--surface-alt);">
           <div style="font-weight:700; margin-bottom:10px; font-size:16px;">+ Ghi nhận vi phạm mới</div>
-          <div class="grid-2" style="margin-bottom:10px;">
-            <div><label class="field-label">Ngày</label><input type="date" id="violation-date" value="${todayISO()}"></div>
-            <div></div>
+          <div style="display:flex; gap:8px; margin-bottom:10px; flex-wrap:wrap;">
+            <div style="width:150px;"><label class="field-label">Ngày</label><input type="date" id="violation-date" value="${todayISO()}"></div>
+            <div style="width:110px;"><label class="field-label">Điểm trừ</label><input type="number" id="violation-points" value="5" min="0" step="1"></div>
+            <div style="flex:1; min-width:220px;"><label class="field-label">Nội dung vi phạm</label><input type="text" id="violation-content" placeholder="VD: Nói chuyện riêng trong giờ học..."></div>
           </div>
-          <label class="field-label">Nội dung vi phạm</label>
-          <textarea id="violation-content" rows="2" placeholder="VD: Nói chuyện riêng trong giờ học, không làm bài tập về nhà..."></textarea>
-          <div style="margin-top:10px; text-align:right;">
-            <button class="btn btn-accent btn-sm" data-action="add-violation" data-class="${classId}" data-student="${studentId}">+ Ghi nhận</button>
+          <div style="text-align:right;">
+            <button class="btn btn-accent btn-sm" data-action="add-violation" data-class="${classId}" data-student="${studentId}">+ Ghi nhận (Enter)</button>
           </div>
         </div>
         ${log.length? log.map(v=>`
           <div style="border-bottom:1px solid var(--line); padding:10px 0; display:flex; justify-content:space-between; gap:10px;">
-            <div><b>${fmtDateVN(v.date)}</b><div class="note-text" style="margin-top:4px;">${esc(v.content)}</div></div>
+            <div><b>${fmtDateVN(v.date)}</b> <span class="tiny mono" style="color:var(--danger);">− ${v.points!==undefined?v.points:5} điểm</span><div class="note-text" style="margin-top:4px;">${esc(v.content)}</div></div>
             <button class="btn btn-danger-outline btn-sm" data-action="delete-violation" data-class="${classId}" data-student="${studentId}" data-entry="${v.id}">Xoá</button>
           </div>`).join('') : `<div class="muted">Chưa có vi phạm nào được ghi nhận cho học sinh này.</div>`}
       </div>
@@ -2870,28 +2872,164 @@ function renderDutiesSection(classId, cls){
 }
 
 /* ---- Thi đua tổ/nhóm theo tuần ---- */
+/* ---- Thi đua tổ/nhóm: hệ thống điểm theo tháng ---- */
+function getTeamSettings(cls){
+  const s = cls.teamSettings || {};
+  return { baseScore: (typeof s.baseScore==='number')? s.baseScore : 60 };
+}
+// Các tháng có dữ liệu liên quan tới thi đua (vi phạm của thành viên, điều chỉnh thủ công) + luôn có tháng hiện tại
+function getTeamMonthsAvailable(classId){
+  const cls = getClass(classId);
+  const keys = new Set([todayISO().slice(0,7)]);
+  (cls.students||[]).forEach(s=> (s.violations||[]).forEach(v=> keys.add(monthKey(v.date))));
+  (cls.teamScores||[]).forEach(e=> keys.add(monthKey(e.date)));
+  return Array.from(keys).sort();
+}
+// Tính điểm 1 tổ trong 1 tháng: khởi điểm + điều chỉnh thủ công (thưởng/phạt) - (số vi phạm thành viên × điểm trừ/lỗi)
+function computeTeamMonthScore(classId, teamId, monthKey_){
+  const cls = getClass(classId);
+  const settings = getTeamSettings(cls);
+  const members = cls.students.filter(s=>s.teamId===teamId);
+  let violationCount = 0, violationDeduction = 0;
+  members.forEach(s=> (s.violations||[]).forEach(v=>{
+    if(monthKey(v.date)===monthKey_){ violationCount++; violationDeduction += (v.points!==undefined ? v.points : 5); }
+  }));
+  const manualEntries = (cls.teamScores||[]).filter(e=> e.teamId===teamId && monthKey(e.date)===monthKey_);
+  const manualBonus = manualEntries.filter(e=>e.points>0).reduce((a,b)=>a+b.points,0);
+  const manualPenalty = manualEntries.filter(e=>e.points<0).reduce((a,b)=>a+Math.abs(b.points),0);
+  const manualSum = manualBonus - manualPenalty;
+  const totalBonus = manualBonus;
+  const totalPenalty = violationDeduction + manualPenalty;
+  const score = settings.baseScore + totalBonus - totalPenalty;
+  return { score, base: settings.baseScore, violationCount, violationDeduction, manualSum, manualBonus, manualPenalty, totalBonus, totalPenalty, manualEntries };
+}
+// Học sinh "tích cực" trong tháng: dựa trên dữ liệu Hoạt động phong trào đã có (mức nhiệt tình TB ≥ 4⭐, có ít nhất 1 hoạt động)
+function isStudentActiveThisMonth(student, monthKey_){
+  const acts = (student.activities||[]).filter(a=> monthKey(a.date)===monthKey_);
+  if(!acts.length) return false;
+  const avg = acts.reduce((a,b)=>a+b.level,0)/acts.length;
+  return avg>=4;
+}
+
+function buildTeamRosterPrompt(classId, teamId, monthKey_){
+  const cls = getClass(classId);
+  const team = (cls.teams||[]).find(t=>t.id===teamId);
+  if(!team) return '';
+  const members = cls.students.filter(s=>s.teamId===teamId);
+  const result = computeTeamMonthScore(classId, teamId, monthKey_);
+  const prevResult = computeTeamMonthScore(classId, teamId, prevMonthKey(monthKey_));
+  const activeMembers = members.filter(m=>isStudentActiveThisMonth(m, monthKey_));
+  const L = [];
+  L.push('Bạn là trợ lý giúp giáo viên chủ nhiệm TỔNG KẾT THÀNH TÍCH THI ĐUA của 1 tổ trong tháng, để thông báo/tôn vinh trước lớp.');
+  L.push('');
+  L.push(`Lớp: ${cls.name}`);
+  L.push(`Tổ: ${team.name}`);
+  L.push(`Tháng: ${monthLabel(monthKey_)}`);
+  L.push(`Sĩ số tổ: ${members.length} học sinh`);
+  L.push('');
+  L.push('=== KẾT QUẢ THI ĐUA THÁNG NÀY ===');
+  L.push(`Điểm khởi điểm: ${result.base}`);
+  L.push(`Điểm cộng (thưởng): +${result.totalBonus}`);
+  L.push(`Điểm trừ (vi phạm + phạt): −${result.totalPenalty} (trong đó ${result.violationCount} lượt vi phạm)`);
+  L.push(`Tổng điểm tháng này: ${result.score}`);
+  L.push(`So với tháng trước (${prevResult.score}): ${result.score-prevResult.score>=0?'+':''}${result.score-prevResult.score}`);
+  L.push('');
+  L.push('=== THÀNH VIÊN ===');
+  if(members.length){
+    members.forEach(m=> L.push(`- ${m.name}${isStudentActiveThisMonth(m, monthKey_) ? ' ⭐ (tích cực trong tháng)' : ''}`));
+  } else {
+    L.push('(Chưa có học sinh nào trong tổ)');
+  }
+  L.push('');
+  L.push('=== YÊU CẦU ===');
+  L.push('Hãy soạn một BẢN TỔNG KẾT THÀNH TÍCH của tổ trong tháng, gồm:');
+  L.push('1. Nhận xét ngắn gọn về kết quả thi đua tháng này (tiến bộ hay đi xuống so với tháng trước, nguyên nhân chính nếu có từ số liệu vi phạm/thưởng).');
+  L.push(`2. Nêu bật và khen ngợi các thành viên có đánh dấu ⭐ (tích cực trong tháng)${activeMembers.length? ': '+activeMembers.map(m=>m.name).join(', ') : ''}.`);
+  L.push('3. Một vài lời động viên để tổ cố gắng hơn (hoặc giữ vững phong độ) trong tháng tới.');
+  L.push('4. Nếu tiện, có thể trình bày thêm dưới dạng hình ảnh/thẻ tổng kết trực quan, màu sắc tươi sáng, phù hợp dán trong lớp học THCS.');
+  return L.join('\n');
+}
+
+function buildClassTeamsDiagramPrompt(classId, monthKey_){
+  const cls = getClass(classId);
+  const teams = cls.teams || [];
+  if(!teams.length) return '';
+  const results = teams.map(t=>({...t, cur: computeTeamMonthScore(classId, t.id, monthKey_)})).sort((a,b)=> b.cur.score-a.cur.score);
+  const L = [];
+  L.push('Bạn là trợ lý giúp giáo viên chủ nhiệm tạo SƠ ĐỒ NHÓM/TỔ trực quan cho CẢ LỚP (gộp tất cả các tổ trong 1 hình duy nhất), dùng để dán bảng tin lớp học.');
+  L.push('');
+  L.push(`Lớp: ${cls.name}`);
+  L.push(`Tháng: ${monthLabel(monthKey_)}`);
+  L.push(`Số tổ: ${teams.length}`);
+  L.push('');
+  L.push('=== DANH SÁCH CÁC TỔ (đã xếp theo điểm thi đua từ cao xuống thấp) ===');
+  results.forEach((t,i)=>{
+    const members = cls.students.filter(s=>s.teamId===t.id);
+    L.push(`${i+1}. ${t.name} — Điểm thi đua tháng: ${t.cur.score}`);
+    if(members.length){
+      members.forEach(m=> L.push(`   - ${m.name}${isStudentActiveThisMonth(m, monthKey_) ? ' ⭐' : ''}`));
+    } else {
+      L.push('   (chưa có học sinh)');
+    }
+  });
+  L.push('');
+  L.push('=== YÊU CẦU ===');
+  L.push('Hãy thiết kế MỘT hình ảnh sơ đồ duy nhất thể hiện TẤT CẢ các tổ của lớp cùng lúc, gồm:');
+  L.push('1. Tiêu đề: tên lớp + tháng.');
+  L.push('2. Mỗi tổ là 1 khối/cột riêng biệt, có tên tổ, điểm thi đua tháng, và danh sách đầy đủ thành viên trong khối đó.');
+  L.push('3. Học sinh có đánh dấu ⭐ thì làm nổi bật hơn (khung/màu khác) để tôn vinh sự tích cực.');
+  L.push('4. Tổ đang xếp hạng cao nhất có thể làm nổi bật hơn (VD thêm huy chương/vương miện nhỏ).');
+  L.push('5. Phong cách tươi sáng, vui vẻ, bố cục rõ ràng dễ đọc, phù hợp in/dán trong lớp học THCS.');
+  return L.join('\n');
+}
+
 function renderTeamsSection(classId, cls){
   const teams = cls.teams || [];
-  const scores = cls.teamScores || [];
-  const totals = teams.map(t=>({...t, total: scores.filter(s=>s.teamId===t.id).reduce((a,b)=>a+b.points,0)}))
-                       .sort((a,b)=> b.total-a.total);
-  const medal = ['🥇','🥈','🥉'];
-  const recentLog = scores.slice().sort((a,b)=> b.date.localeCompare(a.date)).slice(0,8);
+  const settings = getTeamSettings(cls);
+  const months = getTeamMonthsAvailable(classId);
+  const month = (state.teamsMonth && months.includes(state.teamsMonth)) ? state.teamsMonth : months[months.length-1];
+  const prevMonth = prevMonthKey(month);
   const teamName = id => { const t = teams.find(x=>x.id===id); return t? t.name : '(đã xoá)'; };
 
+  const results = teams.map(t=>{
+    const cur = computeTeamMonthScore(classId, t.id, month);
+    const prev = computeTeamMonthScore(classId, t.id, prevMonth);
+    const hasPrevData = months.includes(prevMonth);
+    return { ...t, cur, prev, delta: hasPrevData ? cur.score - prev.score : null, hasPrevData };
+  }).sort((a,b)=> b.cur.score - a.cur.score);
+
+  const medal = ['🥇','🥈','🥉'];
+  const monthLog = (cls.teamScores||[]).filter(e=>monthKey(e.date)===month).slice().sort((a,b)=> b.date.localeCompare(a.date));
+
   return `
+    <div class="card" style="display:flex; gap:16px; align-items:flex-end; flex-wrap:wrap;">
+      <div><label class="field-label">Tháng thi đua</label><input type="month" value="${month}" data-action="teams-change-month"></div>
+      <div><label class="field-label">Điểm khởi điểm / tổ / tháng</label><input type="number" value="${settings.baseScore}" style="width:80px;" data-action="teams-set-base-score"></div>
+      ${results.length? `<button class="btn btn-outline" style="margin-left:auto;" data-action="generate-class-teams-prompt" data-class="${classId}" data-month="${month}">✨ Tạo sơ đồ nhóm cả lớp</button>` : ''}
+    </div>
+
     <div class="card">
-      <div class="card-title">🏁 Bảng xếp hạng thi đua</div>
-      ${totals.length? `
-      <table style="margin-bottom:16px;"><thead><tr><th>#</th><th>Tổ/Nhóm</th><th>Điểm tổng</th><th></th></tr></thead><tbody>
-      ${totals.map((t,i)=>`
+      <div class="card-title">🏁 Bảng xếp hạng thi đua — ${monthLabel(month)}</div>
+      ${results.length? `
+      <table style="margin-bottom:16px;"><thead><tr>
+        <th>#</th><th>Tổ/Nhóm</th><th style="text-align:center;">Điểm tháng này</th><th style="text-align:center;">So với tháng trước</th><th style="text-align:center;">Điểm cộng</th><th style="text-align:center;">Điểm trừ</th><th></th>
+      </tr></thead><tbody>
+      ${results.map((t,i)=>`
         <tr class="ledger">
           <td class="mono">${medal[i]||(i+1)}</td>
-          <td>${esc(t.name)}</td>
-          <td class="mono">${t.total}</td>
-          <td style="text-align:right;"><button class="btn btn-danger-outline btn-sm" data-action="delete-team" data-class="${classId}" data-team="${t.id}">Xoá tổ</button></td>
+          <td><b>${esc(t.name)}</b></td>
+          <td class="mono" style="text-align:center;font-weight:700;">${t.cur.score}</td>
+          <td class="mono" style="text-align:center;color:${trendColor(t.delta)};">${t.hasPrevData ? (t.delta!==null? trendArrow(t.delta)+(t.delta>=0?'+':'')+t.delta : '—') : '<span class="tiny">(chưa có tháng trước)</span>'}</td>
+          <td class="mono" style="text-align:center;color:var(--success);">${t.cur.totalBonus>0? '+'+t.cur.totalBonus : '—'}</td>
+          <td class="mono" style="text-align:center;color:var(--danger);">${t.cur.totalPenalty>0? '−'+t.cur.totalPenalty : '—'}</td>
+          <td style="text-align:right;white-space:nowrap;">
+            <button class="btn btn-outline btn-sm" data-action="generate-team-prompt" data-class="${classId}" data-team="${t.id}" data-month="${month}">✨ Tổng kết tổ</button>
+            <button class="btn btn-danger-outline btn-sm" data-action="delete-team" data-class="${classId}" data-team="${t.id}">Xoá</button>
+          </td>
         </tr>`).join('')}
-      </tbody></table>` : `<div class="muted" style="margin-bottom:14px;">Chưa có tổ/nhóm nào — tạo bên dưới.</div>`}
+      </tbody></table>
+      <div class="tiny" style="margin-bottom:14px;">Điểm tháng này = ${settings.baseScore} (khởi điểm) + Điểm cộng − Điểm trừ. Điểm trừ gồm cả vi phạm tự động lẫn điều chỉnh phạt thủ công; Điểm cộng chỉ tính điều chỉnh thưởng thủ công.</div>
+      ` : `<div class="muted" style="margin-bottom:14px;">Chưa có tổ/nhóm nào — tạo bên dưới.</div>`}
 
       <div style="display:flex; gap:8px; margin-bottom:18px; max-width:420px;">
         <input type="text" id="new-team-name" placeholder="Tên tổ mới (VD: Tổ 1)">
@@ -2899,40 +3037,78 @@ function renderTeamsSection(classId, cls){
       </div>
 
       ${teams.length? `
-      <div style="font-weight:700; margin-bottom:10px; font-size:16px;">+ Cộng / trừ điểm</div>
-      <div class="grid-2" style="margin-bottom:10px;">
-        <div><label class="field-label">Tổ</label><select id="score-team-select">${teams.map(t=>`<option value="${t.id}">${esc(t.name)}</option>`).join('')}</select></div>
-        <div><label class="field-label">Điểm (nhập số âm để trừ)</label><input type="number" id="score-points" step="1" placeholder="VD: 5 hoặc -3"></div>
+      <div style="font-weight:700; margin-bottom:10px; font-size:16px;">+ Điều chỉnh điểm (thưởng / phạt thêm trong tháng)</div>
+      <div style="display:flex; gap:8px; margin-bottom:10px; flex-wrap:wrap; align-items:flex-end;">
+        <div style="width:130px;"><label class="field-label">Tổ</label><select id="score-team-select">${teams.map(t=>`<option value="${t.id}">${esc(t.name)}</option>`).join('')}</select></div>
+        <div style="width:100px;"><label class="field-label">Điểm (±)</label><input type="number" id="score-points" step="1" placeholder="5 / -3"></div>
+        <div style="width:150px;"><label class="field-label">Ngày</label><input type="date" id="score-date" value="${todayISO()}"></div>
+        <div style="flex:1; min-width:200px;"><label class="field-label">Lý do</label><input type="text" id="score-reason" placeholder="VD: Trực nhật sạch sẽ..."></div>
       </div>
-      <label class="field-label">Lý do</label>
-      <input type="text" id="score-reason" placeholder="VD: Trực nhật sạch sẽ, đi học đầy đủ...">
-      <div style="margin-top:10px; text-align:right;">
-        <button class="btn btn-accent btn-sm" data-action="add-team-score" data-class="${classId}">+ Cộng điểm</button>
+      <div style="text-align:right;">
+        <button class="btn btn-accent btn-sm" data-action="add-team-score" data-class="${classId}">+ Áp dụng (Enter)</button>
       </div>` : ''}
     </div>
 
     <div class="card">
       <div class="card-title">Phân tổ học sinh</div>
-      <table><thead><tr><th>Học sinh</th><th>Tổ</th></tr></thead><tbody>
-      ${cls.students.map(s=>`
+      <div class="muted" style="margin-bottom:10px;">⭐ cạnh tên = thành viên tích cực trong tháng (dựa theo mức nhiệt tình hoạt động phong trào ≥ 4⭐).</div>
+      <table><thead><tr><th>Học sinh</th><th>Tổ</th><th style="text-align:center;">Điểm tổ (tháng này)</th><th style="text-align:center;">Hạng tổ</th></tr></thead><tbody>
+      ${cls.students.map(s=>{
+        const rank = s.teamId ? results.findIndex(t=>t.id===s.teamId)+1 : 0;
+        const teamResult = s.teamId ? results.find(t=>t.id===s.teamId) : null;
+        const active = isStudentActiveThisMonth(s, month);
+        return `
         <tr class="ledger">
-          <td>${esc(s.name)}</td>
+          <td>${esc(s.name)}${active? ' <span title="Thành viên tích cực trong tháng">⭐</span>' : ''}</td>
           <td>
             <select data-action="set-student-team" data-class="${classId}" data-student="${s.id}">
               <option value="">— Chưa phân tổ —</option>
               ${teams.map(t=>`<option value="${t.id}" ${s.teamId===t.id?'selected':''}>${esc(t.name)}</option>`).join('')}
             </select>
           </td>
-        </tr>`).join('')}
+          <td class="mono" style="text-align:center;">${teamResult? teamResult.cur.score : '—'}</td>
+          <td class="mono" style="text-align:center;">${rank? (medal[rank-1]||('#'+rank)) : '—'}</td>
+        </tr>`;
+      }).join('')}
       </tbody></table>
     </div>
 
-    ${recentLog.length? `
+    ${monthLog.length? `
     <div class="card">
-      <div class="card-title">Lịch sử cộng điểm gần đây</div>
+      <div class="card-title">Lịch sử điều chỉnh trong tháng ${monthLabel(month)}</div>
       <table><thead><tr><th>Ngày</th><th>Tổ</th><th>Điểm</th><th>Lý do</th></tr></thead><tbody>
-      ${recentLog.map(l=>`<tr class="ledger"><td>${fmtDateVN(l.date)}</td><td>${esc(teamName(l.teamId))}</td><td class="mono">${l.points>=0?'+':''}${l.points}</td><td class="note-text">${esc(l.reason||'')}</td></tr>`).join('')}
+      ${monthLog.map(l=>`<tr class="ledger"><td>${fmtDateVN(l.date)}</td><td>${esc(teamName(l.teamId))}</td><td class="mono">${l.points>=0?'+':''}${l.points}</td><td class="note-text">${esc(l.reason||'')}</td></tr>`).join('')}
       </tbody></table>
+    </div>` : ''}
+
+    ${state.classTeamsPrompt ? `
+    <div class="card">
+      <div class="card-title">
+        <span>📝 Prompt sơ đồ nhóm cả lớp</span>
+        <button class="btn btn-outline btn-sm" data-action="copy-class-teams-prompt">💬 Copy</button>
+      </div>
+      <div class="muted" style="margin-bottom:8px;">Dán vào ChatGPT (hoặc công cụ tạo ảnh) để vẽ 1 sơ đồ duy nhất gồm tất cả các tổ.</div>
+      <textarea id="class-teams-prompt-text" rows="12">${esc(state.classTeamsPrompt)}</textarea>
+    </div>` : ''}
+
+    ${state.teamsPrompts && Object.keys(state.teamsPrompts).length ? `
+    <div class="card">
+      <div class="card-title">📝 Prompt tổng kết tổ đã tạo</div>
+      ${Object.entries(state.teamsPrompts).map(([tid,text])=>{
+        const t = teams.find(x=>x.id===tid);
+        if(!t) return '';
+        return `
+        <div style="border:1px solid var(--line); border-radius:8px; padding:14px; margin-bottom:12px;">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; flex-wrap:wrap; gap:8px;">
+            <b>${esc(t.name)}</b>
+            <div style="display:flex; gap:8px;">
+              <button class="btn btn-outline btn-sm" data-action="copy-team-prompt" data-team="${tid}">💬 Copy</button>
+              <button class="btn btn-danger-outline btn-sm" data-action="remove-team-prompt" data-team="${tid}">Xoá</button>
+            </div>
+          </div>
+          <textarea id="team-prompt-${tid}" rows="8">${esc(text)}</textarea>
+        </div>`;
+      }).join('')}
     </div>` : ''}
   `;
 }
@@ -4167,6 +4343,33 @@ function attachHandlers(){
       backupInput.value = '';
     });
   }
+
+  // Enter để gửi nhanh: form ghi nhận vi phạm (ngày/điểm trừ/nội dung)
+  ['violation-date','violation-points','violation-content'].forEach(id=>{
+    const el = app.querySelector('#'+id);
+    if(el){
+      el.addEventListener('keydown', (e)=>{
+        if(e.key==='Enter'){
+          e.preventDefault();
+          const btn = app.querySelector('[data-action="add-violation"]');
+          if(btn) btn.click();
+        }
+      });
+    }
+  });
+  // Enter để gửi nhanh: form điều chỉnh điểm tổ (tổ/điểm/ngày/lý do)
+  ['score-team-select','score-points','score-date','score-reason'].forEach(id=>{
+    const el = app.querySelector('#'+id);
+    if(el){
+      el.addEventListener('keydown', (e)=>{
+        if(e.key==='Enter'){
+          e.preventDefault();
+          const btn = app.querySelector('[data-action="add-team-score"]');
+          if(btn) btn.click();
+        }
+      });
+    }
+  });
 }
 
 async function handleFieldChange(elx){
@@ -4808,15 +5011,19 @@ async function handleAction(action, elx, e){
     case 'add-violation': {
       const classId = elx.dataset.class, studentId = elx.dataset.student;
       const dateEl = document.getElementById('violation-date');
+      const pointsEl = document.getElementById('violation-points');
       const contentEl = document.getElementById('violation-content');
       const content = contentEl ? contentEl.value.trim() : '';
       if(!content){ showToast('Nhập nội dung vi phạm trước khi lưu nhé.'); break; }
+      const points = pointsEl ? Math.max(0, Number(pointsEl.value)||0) : 5;
       const cls = getClass(classId);
       const st = cls && cls.students.find(s=>s.id===studentId);
       if(st){
         if(!st.violations) st.violations = [];
-        st.violations.push({id: uid(), date: dateEl && dateEl.value ? dateEl.value : todayISO(), content});
+        st.violations.push({id: uid(), date: dateEl && dateEl.value ? dateEl.value : todayISO(), content, points});
         render(); saveClasses();
+        showToast('Đã ghi nhận vi phạm.');
+        setTimeout(()=>{ const i=document.getElementById('violation-content'); if(i) i.focus(); }, 0);
       }
       break;
     }
@@ -4932,13 +5139,59 @@ async function handleAction(action, elx, e){
       const teamSel = document.getElementById('score-team-select');
       const pointsEl = document.getElementById('score-points');
       const reasonEl = document.getElementById('score-reason');
+      const dateEl = document.getElementById('score-date');
       const teamId = teamSel ? teamSel.value : '';
       const points = pointsEl ? Number(pointsEl.value) : NaN;
       if(!teamId || !points){ showToast('Chọn tổ và nhập số điểm (khác 0) nhé.'); break; }
       const cls = getClass(classId);
       if(!cls.teamScores) cls.teamScores = [];
-      cls.teamScores.push({id: uid(), teamId, points, reason: reasonEl?reasonEl.value.trim():'', date: todayISO()});
+      cls.teamScores.push({id: uid(), teamId, points, reason: reasonEl?reasonEl.value.trim():'', date: (dateEl&&dateEl.value)?dateEl.value:todayISO()});
       render(); saveClasses();
+      showToast('Đã áp dụng điều chỉnh.');
+      setTimeout(()=>{ const i=document.getElementById('score-points'); if(i) i.focus(); }, 0);
+      break;
+    }
+    case 'teams-change-month': state.teamsMonth = elx.value; render(); break;
+    case 'teams-set-base-score': {
+      const classId = elx.dataset.class || state.homeroom.classId || state.currentClassId;
+      const cls = getClass(classId);
+      const v = Number(elx.value);
+      if(!cls.teamSettings) cls.teamSettings = {};
+      if(!isNaN(v)) cls.teamSettings.baseScore = v;
+      render(); saveClasses();
+      break;
+    }
+    case 'generate-team-prompt': {
+      const text = buildTeamRosterPrompt(elx.dataset.class, elx.dataset.team, elx.dataset.month);
+      if(text){ if(!state.teamsPrompts) state.teamsPrompts={}; state.teamsPrompts[elx.dataset.team] = text; render(); }
+      break;
+    }
+    case 'generate-class-teams-prompt': {
+      const text = buildClassTeamsDiagramPrompt(elx.dataset.class, elx.dataset.month);
+      if(text){ state.classTeamsPrompt = text; render(); }
+      else { showToast('Chưa có tổ nào để tạo sơ đồ.'); }
+      break;
+    }
+    case 'copy-class-teams-prompt': {
+      const el = document.getElementById('class-teams-prompt-text');
+      const text = el ? el.value : state.classTeamsPrompt;
+      copyTextToClipboard(text).then(ok=>{
+        showToast(ok ? 'Đã copy — dán vào ChatGPT để tạo sơ đồ.' : 'Không copy được, cô bôi đen (Ctrl+A) rồi Ctrl+C nhé.', 3200);
+      });
+      break;
+    }
+    case 'copy-team-prompt': {
+      const tid = elx.dataset.team;
+      const el = document.getElementById('team-prompt-'+tid);
+      const text = el ? el.value : (state.teamsPrompts||{})[tid];
+      copyTextToClipboard(text).then(ok=>{
+        showToast(ok ? 'Đã copy — dán vào ChatGPT để tạo ảnh tổ.' : 'Không copy được, cô bôi đen (Ctrl+A) rồi Ctrl+C nhé.', 3200);
+      });
+      break;
+    }
+    case 'remove-team-prompt': {
+      if(state.teamsPrompts) delete state.teamsPrompts[elx.dataset.team];
+      render();
       break;
     }
 
