@@ -459,7 +459,7 @@ const state = {
   honors: {
     classId:null, period:'month', month:null, semester:'hk1',
     criteria: {score:true, improve:true, attendance:true, homework:true, conduct:true, activity:true},
-    thresholds: {score:8.5, improve:1.0, attendance:95, homework:90, activityLevel:4, activityMinCount:2},
+    thresholds: {score:8.5, improve:1.0, attendance:95, homework:90, activityLevel:8, activityMinCount:2},
     prompts: {}
   },
   riskMgmt: {
@@ -2551,12 +2551,20 @@ function renderActivitiesSection(classId, cls){
     const st = cls.students.find(s=>s.id===studentId);
     if(!st) return `<div class="card empty"><h3>Không tìm thấy học sinh</h3></div>`;
     const log = (st.activities||[]).slice().sort((a,b)=> b.date.localeCompare(a.date) || b.id.localeCompare(a.id));
+    const team = st.teamId ? (cls.teams||[]).find(t=>t.id===st.teamId) : null;
     return `
       <div class="card">
         <div class="card-title">
           <span>Hoạt động phong trào — ${esc(st.name)} (${log.length} lượt)</span>
           <button class="btn btn-outline btn-sm" data-action="activities-back">← Quay lại danh sách</button>
         </div>
+        ${team ? `
+        <div class="tiny" style="background:var(--surface-alt); border-radius:8px; padding:8px 12px; margin-bottom:14px;">
+          🔗 Em thuộc <b>${esc(team.name)}</b> — mức nhiệt tình mỗi lượt sẽ <b>tự động cộng điểm tổ</b> (bằng đúng số sao) trong đúng tháng ghi nhận (xem tại Thi đua tổ/nhóm).
+        </div>` : `
+        <div class="tiny" style="background:var(--surface-alt); border-radius:8px; padding:8px 12px; margin-bottom:14px;">
+          ⚪ Em chưa được phân tổ, nên hoạt động ghi ở đây sẽ chưa cộng vào điểm tổ nào.
+        </div>`}
         <div style="max-width:320px; margin-bottom:16px;">
           <label class="field-label">CLB / Câu lạc bộ</label>
           <select data-action="set-student-club" data-class="${classId}" data-student="${studentId}">
@@ -2571,11 +2579,8 @@ function renderActivitiesSection(classId, cls){
             <div><label class="field-label">Ngày</label><input type="date" id="activity-date" value="${todayISO()}"></div>
             <div><label class="field-label">Tên hoạt động</label><input type="text" id="activity-name" placeholder="VD: Thi đấu bóng rổ liên trường"></div>
           </div>
-          <label class="field-label">Mức độ nhiệt tình / năng nổ</label>
-          <input type="hidden" id="activity-level-value" value="5">
-          <div class="rating-row" style="margin-bottom:10px;">
-            ${[1,2,3,4,5].map(n=>`<div class="rating-dot on" data-pick-level="${n}">${n}</div>`).join('')}
-          </div>
+          <label class="field-label">Điểm cộng ${team? '<span class="tiny">(sẽ cộng vào điểm tổ tháng này)</span>':''}</label>
+          <input type="number" id="activity-points-value" value="5" min="0" step="1" style="width:110px; margin-bottom:10px;">
           <label class="field-label">Ghi chú (tuỳ chọn)</label>
           <textarea id="activity-note" rows="2" placeholder="VD: Rất tích cực, chủ động hỗ trợ các bạn trong đội..."></textarea>
           <div style="margin-top:10px; text-align:right;">
@@ -2586,8 +2591,9 @@ function renderActivitiesSection(classId, cls){
         ${log.length? log.map(a=>`
           <div style="border-bottom:1px solid var(--line); padding:10px 0; display:flex; justify-content:space-between; gap:10px;">
             <div>
-              <b>${fmtDateVN(a.date)}</b> · ${esc(a.activityName)} · <span class="tiny">${'⭐'.repeat(a.level)}</span>
+              <b>${fmtDateVN(a.date)}</b> · ${esc(a.activityName)} · <span class="tiny mono" style="color:var(--success);">+${a.points!==undefined?a.points:a.level} điểm</span>
               ${a.note? `<div class="note-text" style="margin-top:4px;">${esc(a.note)}</div>`:''}
+              ${team? `<div class="tiny" style="margin-top:3px;color:var(--ink-faint);">→ Đã cộng ${a.points!==undefined?a.points:a.level} điểm cho ${esc(team.name)}, tháng ${monthLabel(monthKey(a.date))}</div>` : ''}
             </div>
             <button class="btn btn-danger-outline btn-sm" data-action="delete-activity" data-class="${classId}" data-student="${studentId}" data-entry="${a.id}">Xoá</button>
           </div>`).join('') : `<div class="muted">Chưa có hoạt động nào được ghi nhận cho học sinh này.</div>`}
@@ -2600,8 +2606,8 @@ function renderActivitiesSection(classId, cls){
     const all = s.activities || [];
     const filtered = semester==='all' ? all : all.filter(a=>getSemesterKey(a.date)===semester);
     const count = filtered.length;
-    const avgLevel = count ? filtered.reduce((a,b)=>a+b.level,0)/count : null;
-    return {id:s.id, name:s.name, club: clubName(s.clubId), count, avgLevel};
+    const totalPoints = count ? filtered.reduce((a,b)=>a+(b.points!==undefined?b.points:b.level||0),0) : null;
+    return {id:s.id, name:s.name, club: clubName(s.clubId), count, totalPoints};
   });
 
   return `
@@ -2622,13 +2628,13 @@ function renderActivitiesSection(classId, cls){
 
     <div class="card">
       <div class="card-title">Theo dõi sự nhiệt tình tham gia hoạt động — ${SEMESTER_LABEL[semester]}</div>
-      <table><thead><tr><th>Học sinh</th><th>CLB</th><th>Số hoạt động tham gia</th><th>Mức nhiệt tình TB</th><th></th></tr></thead><tbody>
+      <table><thead><tr><th>Học sinh</th><th>CLB</th><th>Số hoạt động tham gia</th><th>Tổng điểm cộng</th><th></th></tr></thead><tbody>
       ${rows.map(r=>`
         <tr class="ledger ${r.count===0?'flagged':''}" style="cursor:pointer;" data-action="activities-select" data-student="${r.id}">
           <td>${esc(r.name)}</td>
           <td>${esc(r.club)}</td>
           <td class="mono">${r.count}</td>
-          <td class="mono">${r.avgLevel!==null? r.avgLevel.toFixed(1)+'/5' : '—'}</td>
+          <td class="mono">${r.totalPoints!==null? '+'+r.totalPoints : '—'}</td>
           <td style="text-align:right;"><button class="btn btn-outline btn-sm" data-action="activities-select" data-student="${r.id}">Xem / Thêm</button></td>
         </tr>`).join('')}
       </tbody></table>
@@ -2722,12 +2728,20 @@ function renderViolationsSection(classId, cls){
     const st = cls.students.find(s=>s.id===studentId);
     if(!st) return `<div class="card empty"><h3>Không tìm thấy học sinh</h3></div>`;
     const log = (st.violations||[]).slice().sort((a,b)=> b.date.localeCompare(a.date) || b.id.localeCompare(a.id));
+    const team = st.teamId ? (cls.teams||[]).find(t=>t.id===st.teamId) : null;
     return `
       <div class="card">
         <div class="card-title">
           <span>Vi phạm nội quy — ${esc(st.name)} (${log.length} lần)</span>
           <button class="btn btn-outline btn-sm" data-action="violations-back">← Quay lại danh sách</button>
         </div>
+        ${team ? `
+        <div class="tiny" style="background:var(--surface-alt); border-radius:8px; padding:8px 12px; margin-bottom:14px;">
+          🔗 Em thuộc <b>${esc(team.name)}</b> — mỗi vi phạm ghi ở đây sẽ <b>tự động trừ điểm tổ</b> trong đúng tháng của ngày vi phạm (xem tại Thi đua tổ/nhóm), không cần nhập lại.
+        </div>` : `
+        <div class="tiny" style="background:var(--surface-alt); border-radius:8px; padding:8px 12px; margin-bottom:14px;">
+          ⚪ Em chưa được phân tổ, nên vi phạm ghi ở đây sẽ chưa trừ vào điểm tổ nào. Vào Thi đua tổ/nhóm để phân tổ nếu cần.
+        </div>`}
         <div style="border:1px solid var(--line); border-radius:8px; padding:14px; margin-bottom:18px; background:var(--surface-alt);">
           <div style="font-weight:700; margin-bottom:10px; font-size:16px;">+ Ghi nhận vi phạm mới</div>
           <div style="display:flex; gap:8px; margin-bottom:10px; flex-wrap:wrap;">
@@ -2741,7 +2755,11 @@ function renderViolationsSection(classId, cls){
         </div>
         ${log.length? log.map(v=>`
           <div style="border-bottom:1px solid var(--line); padding:10px 0; display:flex; justify-content:space-between; gap:10px;">
-            <div><b>${fmtDateVN(v.date)}</b> <span class="tiny mono" style="color:var(--danger);">− ${v.points!==undefined?v.points:5} điểm</span><div class="note-text" style="margin-top:4px;">${esc(v.content)}</div></div>
+            <div>
+              <b>${fmtDateVN(v.date)}</b> <span class="tiny mono" style="color:var(--danger);">− ${v.points!==undefined?v.points:5} điểm</span>
+              <div class="note-text" style="margin-top:4px;">${esc(v.content)}</div>
+              ${team? `<div class="tiny" style="margin-top:3px;color:var(--ink-faint);">→ Đã trừ vào điểm ${esc(team.name)}, tháng ${monthLabel(monthKey(v.date))}</div>` : ''}
+            </div>
             <button class="btn btn-danger-outline btn-sm" data-action="delete-violation" data-class="${classId}" data-student="${studentId}" data-entry="${v.id}">Xoá</button>
           </div>`).join('') : `<div class="muted">Chưa có vi phạm nào được ghi nhận cho học sinh này.</div>`}
       </div>
@@ -2894,21 +2912,25 @@ function computeTeamMonthScore(classId, teamId, monthKey_){
   members.forEach(s=> (s.violations||[]).forEach(v=>{
     if(monthKey(v.date)===monthKey_){ violationCount++; violationDeduction += (v.points!==undefined ? v.points : 5); }
   }));
+  let activityBonus = 0, activityCount = 0;
+  members.forEach(s=> (s.activities||[]).forEach(a=>{
+    if(monthKey(a.date)===monthKey_){ activityCount++; activityBonus += (a.points!==undefined ? a.points : (a.level||0)); }
+  }));
   const manualEntries = (cls.teamScores||[]).filter(e=> e.teamId===teamId && monthKey(e.date)===monthKey_);
   const manualBonus = manualEntries.filter(e=>e.points>0).reduce((a,b)=>a+b.points,0);
   const manualPenalty = manualEntries.filter(e=>e.points<0).reduce((a,b)=>a+Math.abs(b.points),0);
   const manualSum = manualBonus - manualPenalty;
-  const totalBonus = manualBonus;
+  const totalBonus = manualBonus + activityBonus;
   const totalPenalty = violationDeduction + manualPenalty;
   const score = settings.baseScore + totalBonus - totalPenalty;
-  return { score, base: settings.baseScore, violationCount, violationDeduction, manualSum, manualBonus, manualPenalty, totalBonus, totalPenalty, manualEntries };
+  return { score, base: settings.baseScore, violationCount, violationDeduction, activityCount, activityBonus, manualSum, manualBonus, manualPenalty, totalBonus, totalPenalty, manualEntries };
 }
-// Học sinh "tích cực" trong tháng: dựa trên dữ liệu Hoạt động phong trào đã có (mức nhiệt tình TB ≥ 4⭐, có ít nhất 1 hoạt động)
+// Học sinh "tích cực" trong tháng: tổng điểm cộng từ hoạt động phong trào trong tháng đạt ngưỡng
 function isStudentActiveThisMonth(student, monthKey_){
   const acts = (student.activities||[]).filter(a=> monthKey(a.date)===monthKey_);
   if(!acts.length) return false;
-  const avg = acts.reduce((a,b)=>a+b.level,0)/acts.length;
-  return avg>=4;
+  const total = acts.reduce((a,b)=>a+(b.points!==undefined?b.points:(b.level||0)),0);
+  return total>=8;
 }
 
 function buildTeamRosterPrompt(classId, teamId, monthKey_){
@@ -2929,7 +2951,7 @@ function buildTeamRosterPrompt(classId, teamId, monthKey_){
   L.push('');
   L.push('=== KẾT QUẢ THI ĐUA THÁNG NÀY ===');
   L.push(`Điểm khởi điểm: ${result.base}`);
-  L.push(`Điểm cộng (thưởng): +${result.totalBonus}`);
+  L.push(`Điểm cộng: +${result.totalBonus} (trong đó ${result.activityCount} lượt hoạt động phong trào +${result.activityBonus}, thưởng thủ công +${result.manualBonus})`);
   L.push(`Điểm trừ (vi phạm + phạt): −${result.totalPenalty} (trong đó ${result.violationCount} lượt vi phạm)`);
   L.push(`Tổng điểm tháng này: ${result.score}`);
   L.push(`So với tháng trước (${prevResult.score}): ${result.score-prevResult.score>=0?'+':''}${result.score-prevResult.score}`);
@@ -3028,7 +3050,7 @@ function renderTeamsSection(classId, cls){
           </td>
         </tr>`).join('')}
       </tbody></table>
-      <div class="tiny" style="margin-bottom:14px;">Điểm tháng này = ${settings.baseScore} (khởi điểm) + Điểm cộng − Điểm trừ. Điểm trừ gồm cả vi phạm tự động lẫn điều chỉnh phạt thủ công; Điểm cộng chỉ tính điều chỉnh thưởng thủ công.</div>
+      <div class="tiny" style="margin-bottom:14px;">Điểm tháng này = ${settings.baseScore} (khởi điểm) + Điểm cộng − Điểm trừ. Điểm trừ gồm vi phạm tự động + phạt thủ công; Điểm cộng gồm hoạt động phong trào tự động (mức nhiệt tình = điểm) + thưởng thủ công.</div>
       ` : `<div class="muted" style="margin-bottom:14px;">Chưa có tổ/nhóm nào — tạo bên dưới.</div>`}
 
       <div style="display:flex; gap:8px; margin-bottom:18px; max-width:420px;">
@@ -3304,9 +3326,9 @@ function computeHonorCandidates(classId, period, key, criteria, thresholds){
 
     if(criteria.activity){
       const acts = (st.activities||[]).filter(a => period==='month' ? monthKey(a.date)===key : getSemesterKey(a.date)===key);
-      const avgLevel = acts.length ? acts.reduce((a,b)=>a+b.level,0)/acts.length : null;
-      details.activity = {avgLevel, count:acts.length};
-      if(acts.length>=thresholds.activityMinCount && avgLevel!==null && avgLevel>=thresholds.activityLevel) badges.push('activity');
+      const totalPoints = acts.length ? acts.reduce((a,b)=>a+(b.points!==undefined?b.points:(b.level||0)),0) : null;
+      details.activity = {totalPoints, count:acts.length};
+      if(acts.length>=thresholds.activityMinCount && totalPoints!==null && totalPoints>=thresholds.activityLevel) badges.push('activity');
     }
 
     if(badges.length){
@@ -3333,7 +3355,7 @@ function buildHonorPrompt(classId, studentId, period, key){
     if(b==='attendance') detail = `Tỷ lệ chuyên cần: ${result.details.attendance}%`;
     if(b==='homework') detail = `Tỷ lệ hoàn thành bài tập: ${result.details.homework}%`;
     if(b==='conduct') detail = 'Xếp loại hạnh kiểm: Tốt';
-    if(b==='activity') detail = `Mức độ nhiệt tình hoạt động: ${result.details.activity.avgLevel.toFixed(1)}/5 (${result.details.activity.count} hoạt động)`;
+    if(b==='activity') detail = `Tổng điểm cộng hoạt động: +${result.details.activity.totalPoints} (${result.details.activity.count} hoạt động)`;
     return `${info.icon} ${info.label} — ${detail}`;
   });
 
@@ -3386,7 +3408,7 @@ function renderHonors(){
     ['attendance','Chuyên cần xuất sắc','attendance','≥','%'],
     ['homework','Hoàn thành bài tập tốt','homework','≥','%'],
     ['conduct','Hạnh kiểm Tốt (suốt kỳ)', null, '', ''],
-    ['activity','Tích cực hoạt động phong trào','activityLevel','TB ≥','⭐'],
+    ['activity','Tích cực hoạt động phong trào','activityLevel','Tổng ≥','điểm'],
   ];
 
   return `
@@ -4304,18 +4326,6 @@ function attachHandlers(){
     });
   });
 
-  // chấm chọn mức độ nhiệt tình tham gia hoạt động — cập nhật ngay, không cần render lại cả trang
-  app.querySelectorAll('[data-pick-level]').forEach(dot=>{
-    dot.addEventListener('click', ()=>{
-      const val = Number(dot.dataset.pickLevel);
-      const hidden = document.getElementById('activity-level-value');
-      if(hidden) hidden.value = val;
-      app.querySelectorAll('[data-pick-level]').forEach(d=>{
-        d.classList.toggle('on', Number(d.dataset.pickLevel) <= val);
-      });
-    });
-  });
-
   const modalInput = app.querySelector('#modal-input');
   if(modalInput){
     modalInput.addEventListener('keydown', (ev)=>{
@@ -4975,7 +4985,7 @@ async function handleAction(action, elx, e){
       const classId = elx.dataset.class, studentId = elx.dataset.student;
       const dateEl = document.getElementById('activity-date');
       const nameEl = document.getElementById('activity-name');
-      const levelEl = document.getElementById('activity-level-value');
+      const pointsEl = document.getElementById('activity-points-value');
       const noteEl = document.getElementById('activity-note');
       const activityName = nameEl ? nameEl.value.trim() : '';
       if(!activityName){ showToast('Nhập tên hoạt động trước khi lưu nhé.'); break; }
@@ -4987,7 +4997,7 @@ async function handleAction(action, elx, e){
           id: uid(),
           date: dateEl && dateEl.value ? dateEl.value : todayISO(),
           activityName,
-          level: levelEl ? (Number(levelEl.value)||5) : 5,
+          points: pointsEl ? (Number(pointsEl.value)||0) : 5,
           note: noteEl ? noteEl.value.trim() : ''
         });
         render(); saveClasses();
