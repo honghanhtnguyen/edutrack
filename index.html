@@ -58,6 +58,12 @@
   .brand-name{ font-family:'Baloo 2',sans-serif; font-size:22px; font-weight:700; line-height:1.15; color:var(--ink);}
   .brand-sub{ font-size:12.5px; color:var(--ink-faint); letter-spacing:.04em; text-transform:uppercase; margin-top:2px;}
   .nav-group-label{ font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:.06em; color:#8C8C8C; padding:14px 12px 6px; }
+  .global-search-wrap{ position:relative; padding:0 4px 6px; }
+  .global-search-wrap input{ width:100%; border:1px solid var(--line); border-radius:9px; padding:9px 12px; font-size:14px; font-family:'Be Vietnam Pro',sans-serif; background:#fff; }
+  .global-search-results{ position:absolute; top:calc(100% - 2px); left:4px; right:4px; background:#fff; border:1px solid var(--line); border-radius:10px; box-shadow:var(--shadow); z-index:80; max-height:340px; overflow-y:auto; }
+  .global-search-item{ display:flex; flex-direction:column; gap:1px; padding:9px 12px; cursor:pointer; border-bottom:1px solid var(--line); font-size:14px; }
+  .global-search-item:last-child{ border-bottom:none; }
+  .global-search-item:hover{ background:var(--accent-soft); }
   .nav-group-label:first-of-type{ padding-top:4px; }
   .nav-item{
     display:flex; align-items:center; gap:10px; padding:11px 12px; border-radius:10px; cursor:pointer; font-family:'Baloo 2',sans-serif;
@@ -228,6 +234,7 @@
     #app{ flex-direction:column; }
     .sidebar{ width:100%; flex-direction:row; overflow-x:auto; padding:12px; align-items:center; }
     .brand{ display:none; }
+    .global-search-wrap{ display:none; }
     .sidebar-foot{ display:none; }
     .nav-item{ white-space:nowrap; }
     .main{ padding:20px; }
@@ -477,6 +484,9 @@ const state = {
   teamsMonth: null,
   teamsPrompts: {},
   classTeamsPrompt: '',
+  violationsSort: 'count-desc',
+  globalSearch: '',
+  studentProfileId: null,
   loaded:false,
   modal:null, // {type:'prompt'|'confirm', title, value, danger, onSubmit}
   teacherName: '',
@@ -684,12 +694,20 @@ function newSession(date){
   };
 }
 
-// Điểm 1 bài luyện tập, quy đổi từ "số câu đúng" sang thang 10.
-// Bài tập cũ (chưa có totalQuestions) được coi như thang 10 câu để không phá dữ liệu đã nhập trước đó.
+// Điểm 1 bài luyện tập. 2 kiểu:
+// - "fraction" (mặc định, tương thích dữ liệu cũ): nhập số câu đúng, quy đổi sang thang 10.
+// - "scale10": nhập thẳng điểm theo thang 10, cho phép thập phân 1 chữ số.
 function exerciseTotal(ex){ return (ex && ex.totalQuestions) ? ex.totalQuestions : 10; }
+function exerciseMode(ex){ return (ex && ex.mode==='scale10') ? 'scale10' : 'fraction'; }
 function scoreOn10(correct, total){
   if(correct===null || correct===undefined || correct==='' || !total) return null;
   return clamp((Number(correct)/total)*10, 0, 10);
+}
+// Điểm hiển thị/tính toán cho 1 bài luyện tập của 1 học sinh, tự chọn công thức theo kiểu bài
+function exerciseScoreOn10(ex, raw){
+  if(raw===null || raw===undefined || raw==='') return null;
+  if(exerciseMode(ex)==='scale10') return clamp(Number(raw), 0, 10);
+  return scoreOn10(raw, exerciseTotal(ex));
 }
 
 function sessionScoreAvg(session, studentId){
@@ -698,8 +716,7 @@ function sessionScoreAvg(session, studentId){
   const vals = [];
   Object.keys(sc).forEach(exId=>{
     const ex = (session.exercises||[]).find(e=>e.id===exId);
-    const total = exerciseTotal(ex);
-    const s10 = scoreOn10(sc[exId], total);
+    const s10 = exerciseScoreOn10(ex, sc[exId]);
     if(s10!==null) vals.push(s10);
   });
   if(!vals.length) return null;
@@ -907,6 +924,17 @@ function render(){
   }
   const warnCount = state.classes.reduce((sum,c)=> sum + getWarnings(c.id).length, 0);
 
+  const searchQuery = (state.globalSearch||'').trim().toLowerCase();
+  let searchMatches = [];
+  if(searchQuery){
+    state.classes.forEach(c=>{
+      c.students.forEach(s=>{
+        if(s.name.toLowerCase().includes(searchQuery)) searchMatches.push({id:s.id, name:s.name, classId:c.id, className:c.name});
+      });
+    });
+    searchMatches = searchMatches.slice(0,8);
+  }
+
   app.innerHTML = `
     <div class="sidebar no-print">
       <div class="brand">
@@ -915,6 +943,16 @@ function render(){
           <div class="brand-name">EduTrack</div>
           <div class="brand-sub">Trợ lý giảng dạy</div>
         </div>
+      </div>
+      <div class="global-search-wrap">
+        <input type="text" id="global-student-search" placeholder="🔍 Tìm học sinh..." value="${esc(state.globalSearch||'')}" autocomplete="off">
+        ${searchQuery ? `
+        <div class="global-search-results">
+          ${searchMatches.length ? searchMatches.map(m=>`
+            <div class="global-search-item" data-action="goto-student-profile" data-student="${m.id}" data-class="${m.classId}">
+              <b>${esc(m.name)}</b><span class="tiny" style="color:var(--ink-faint);">${esc(m.className)}</span>
+            </div>`).join('') : `<div class="global-search-item tiny" style="color:var(--ink-faint);cursor:default;">Không tìm thấy học sinh nào.</div>`}
+        </div>` : ''}
       </div>
       ${NAV_GROUPS.map(g=>`
         <div class="nav-group-label">${g.label}</div>
@@ -951,6 +989,7 @@ function renderTab(){
     case 'honors': return renderHonors();
     case 'riskMgmt': return renderRiskManagement();
     case 'records': return renderRecords();
+    case 'studentProfile': return renderStudentProfile();
     default: return '';
   }
 }
@@ -964,20 +1003,20 @@ function getTodaySuggestions(){
   const dayOfWeek = d.getDay(); // 0=CN,1=T2,...,6=T7
   const suggestions = [];
 
-  suggestions.push({icon:'✎', title:'Ghi nhận buổi học hôm nay', detail:'Điểm danh, checklist bài tập và điểm số cho buổi dạy hôm nay.', tab:'session'});
+  suggestions.push({id:'session-today', icon:'✎', title:'Ghi nhận buổi học hôm nay', detail:'Điểm danh, checklist bài tập và điểm số cho buổi dạy hôm nay.', tab:'session'});
 
   if(dayOfMonth<=5){
-    suggestions.push({icon:'📋', title:'Đầu tháng — chấm hạnh kiểm & nhập điểm KT tháng trước', detail:'Vào Công tác chủ nhiệm để xếp loại hạnh kiểm và nhập điểm kiểm tra định kỳ của tháng vừa qua.', tab:'homeroom', section:'conduct'});
+    suggestions.push({id:'monthly-conduct-exam', icon:'📋', title:'Đầu tháng — chấm hạnh kiểm & nhập điểm KT tháng trước', detail:'Vào Công tác chủ nhiệm để xếp loại hạnh kiểm và nhập điểm kiểm tra định kỳ của tháng vừa qua.', tab:'homeroom', section:'conduct'});
   }
   if(dayOfMonth>=25){
-    suggestions.push({icon:'🎖️', title:'Cuối tháng — xét vinh danh học sinh', detail:'Xem học sinh xứng đáng vinh danh trước khi sang tháng mới.', tab:'honors'});
-    suggestions.push({icon:'🚨', title:'Cuối tháng — rà soát Quản trị rủi ro', detail:'Kiểm tra lại danh sách học sinh cần hỗ trợ trước khi tổng kết tháng.', tab:'riskMgmt'});
+    suggestions.push({id:'monthly-honors', icon:'🎖️', title:'Cuối tháng — xét vinh danh học sinh', detail:'Xem học sinh xứng đáng vinh danh trước khi sang tháng mới.', tab:'honors'});
+    suggestions.push({id:'monthly-risk', icon:'🚨', title:'Cuối tháng — rà soát Quản trị rủi ro', detail:'Kiểm tra lại danh sách học sinh cần hỗ trợ trước khi tổng kết tháng.', tab:'riskMgmt'});
   }
   if(dayOfWeek===5 || dayOfWeek===6){
-    suggestions.push({icon:'🧹', title:'Cuối tuần — sắp xếp trực nhật tuần tới', detail:'Xem lại lịch xoay vòng trực nhật cho tuần sau.', tab:'homeroom', section:'duties'});
+    suggestions.push({id:'weekend-duty', icon:'🧹', title:'Cuối tuần — sắp xếp trực nhật tuần tới', detail:'Xem lại lịch xoay vòng trực nhật cho tuần sau.', tab:'homeroom', section:'duties'});
   }
   if(dayOfWeek===1){
-    suggestions.push({icon:'🏁', title:'Đầu tuần — cộng điểm thi đua tổ/nhóm', detail:'Tổng kết điểm thi đua tuần trước cho các tổ.', tab:'homeroom', section:'teams'});
+    suggestions.push({id:'monday-teams', icon:'🏁', title:'Đầu tuần — cộng điểm thi đua tổ/nhóm', detail:'Tổng kết điểm thi đua tuần trước cho các tổ.', tab:'homeroom', section:'teams'});
   }
 
   return suggestions;
@@ -1049,6 +1088,109 @@ function renderSyncCard(){
   `;
 }
 
+function renderStudentProfile(){
+  const studentId = state.studentProfileId;
+  let cls = null, st = null;
+  for(const c of state.classes){
+    const found = c.students.find(s=>s.id===studentId);
+    if(found){ cls = c; st = found; break; }
+  }
+  if(!st){
+    return `<div class="topbar"><h1 class="page-title">Hồ sơ học sinh</h1></div><div class="card empty"><h3>Không tìm thấy học sinh</h3><button class="btn btn-outline" data-action="goto-suggestion" data-tab="home" style="margin-top:10px;">← Về Trang chủ</button></div>`;
+  }
+  const classId = cls.id;
+  const att = studentAttendanceStats(classId, studentId);
+  const series = studentScoreSeries(classId, studentId);
+  const avgScore = series.length? (series.reduce((a,b)=>a+b.score,0)/series.length) : null;
+  const cl = studentChecklistStats(classId, studentId);
+  const team = st.teamId ? (cls.teams||[]).find(t=>t.id===st.teamId) : null;
+  const club = st.clubId ? (cls.clubs||[]).find(c=>c.id===st.clubId) : null;
+  const warns = getWarnings(classId).filter(w=>w.studentId===studentId);
+
+  const conductMonths = Object.keys(cls.conduct||{}).sort();
+  const lastConductMonth = conductMonths[conductMonths.length-1];
+  let conductRating = null;
+  if(lastConductMonth){
+    const saved = (cls.conduct[lastConductMonth]||{})[studentId] || {};
+    conductRating = saved.rating || conductSuggestion(classId, lastConductMonth, studentId).rating;
+  }
+
+  const violations = (st.violations||[]).slice().sort((a,b)=> b.date.localeCompare(a.date));
+  const activities = (st.activities||[]).slice().sort((a,b)=> b.date.localeCompare(a.date));
+  const contactLog = (st.contactLog||[]).slice().sort((a,b)=> b.date.localeCompare(a.date));
+
+  return `
+    <div class="topbar no-print">
+      <div><h1 class="page-title">👤 Hồ sơ học sinh</h1>${chalkUnderline()}<div class="page-sub">Tổng hợp nhanh — vi phạm, hoạt động, báo cáo, trao đổi PH</div></div>
+      <button class="btn btn-outline" data-action="close-student-profile">← Đóng hồ sơ</button>
+    </div>
+
+    <div class="card">
+      <div style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:10px;">
+        <div>
+          <div style="font-family:'Baloo 2',sans-serif; font-weight:700; font-size:22px;">${esc(st.name)}</div>
+          <div class="muted">Lớp: ${esc(cls.name)}${team? ' · '+esc(team.name) : ''}${club? ' · '+esc(club.name) : ''}</div>
+        </div>
+        <button class="btn btn-accent" data-action="goto-report-profile" data-class="${classId}" data-student="${studentId}">📋 Xem báo cáo học tập đầy đủ</button>
+      </div>
+    </div>
+
+    <div class="grid-4" style="margin-bottom:18px;">
+      <div class="card" style="margin-bottom:0;"><div class="stat-num">${att.rate!==null? att.rate+'%':'—'}</div><div class="stat-label">Chuyên cần</div></div>
+      <div class="card" style="margin-bottom:0;"><div class="stat-num">${avgScore!==null? avgScore.toFixed(1):'—'}</div><div class="stat-label">Điểm TB buổi học</div></div>
+      <div class="card" style="margin-bottom:0;"><div class="stat-num">${conductRating? CONDUCT_LABEL[conductRating] : '—'}</div><div class="stat-label">Hạnh kiểm gần nhất</div></div>
+      <div class="card" style="margin-bottom:0;"><div class="stat-num">${cl.rate!==null? cl.rate+'%':'—'}</div><div class="stat-label">Hoàn thành bài tập</div></div>
+    </div>
+
+    ${warns.length? `
+    <div class="warn-banner">
+      <div class="dot"></div>
+      <div style="flex:1;">
+        <div class="warn-title">⚠ Đang có cảnh báo</div>
+        ${warns.map(w=>`<div class="warn-detail">${esc(w.detail)}</div>`).join('')}
+      </div>
+    </div>` : ''}
+
+    <div class="grid-2">
+      <div class="card">
+        <div class="card-title">
+          <span>⚠ Vi phạm nội quy <span class="tiny">(${violations.length})</span></span>
+          <button class="btn btn-outline btn-sm" data-action="goto-violations-profile" data-class="${classId}" data-student="${studentId}">Xem tất cả →</button>
+        </div>
+        ${violations.length? violations.slice(0,3).map(v=>`
+          <div style="border-bottom:1px solid var(--line); padding:8px 0;">
+            <b class="tiny">${fmtDateVN(v.date)}</b> <span class="tiny mono" style="color:var(--danger);">−${v.points!==undefined?v.points:5}</span>
+            <div class="note-text">${esc(v.content)}</div>
+          </div>`).join('') : `<div class="muted">Chưa có vi phạm nào.</div>`}
+      </div>
+
+      <div class="card">
+        <div class="card-title">
+          <span>🙌 Hoạt động phong trào <span class="tiny">(${activities.length})</span></span>
+          <button class="btn btn-outline btn-sm" data-action="goto-activities-profile" data-class="${classId}" data-student="${studentId}">Xem tất cả →</button>
+        </div>
+        ${activities.length? activities.slice(0,3).map(a=>`
+          <div style="border-bottom:1px solid var(--line); padding:8px 0;">
+            <b class="tiny">${fmtDateVN(a.date)}</b> <span class="tiny mono" style="color:var(--success);">+${a.points!==undefined?a.points:(a.level||0)}</span>
+            <div class="note-text">${esc(a.activityName)}</div>
+          </div>`).join('') : `<div class="muted">Chưa có hoạt động nào.</div>`}
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">
+        <span>☎ Trao đổi phụ huynh <span class="tiny">(${contactLog.length})</span></span>
+        <button class="btn btn-outline btn-sm" data-action="goto-contacts-profile" data-class="${classId}" data-student="${studentId}">Xem tất cả →</button>
+      </div>
+      ${contactLog.length? contactLog.slice(0,3).map(c=>`
+        <div style="border-bottom:1px solid var(--line); padding:8px 0;">
+          <b class="tiny">${fmtDateVN(c.date)}</b> <span class="tiny">(${esc(c.method||'')})</span>
+          <div class="note-text">${esc(c.content||'')}</div>
+        </div>`).join('') : `<div class="muted">Chưa có lần trao đổi nào được ghi nhận.</div>`}
+    </div>
+  `;
+}
+
 function renderHome(){
   if(!state.classes.length){
     return `
@@ -1114,15 +1256,19 @@ function renderHome(){
 
     <div class="card" style="background:var(--ink); color:#fff;">
       <div class="card-title" style="color:#fff;">🧭 Gợi ý cho hôm nay <span class="tiny" style="color:#C7CBCE;">(${fmtDateVN(today)})</span></div>
-      ${suggestions.map(s=>`
+      ${suggestions.map(s=>{
+        const done = !!todayDone[s.id];
+        return `
         <div style="display:flex; align-items:center; gap:12px; padding:9px 0; border-bottom:1px solid rgba(255,255,255,.12);">
+          <input type="checkbox" ${done?'checked':''} data-action="toggle-suggestion-done" data-id="${s.id}" style="width:20px;height:20px;flex-shrink:0;">
           <span style="font-size:20px;">${s.icon}</span>
           <div style="flex:1;">
-            <div style="font-weight:700; font-family:'Baloo 2',sans-serif; font-size:15.5px;">${esc(s.title)}</div>
+            <div style="font-weight:700; font-family:'Baloo 2',sans-serif; font-size:15.5px; ${done?'text-decoration:line-through;opacity:.65;':''}">${esc(s.title)}</div>
             <div class="tiny" style="color:#C7CBCE;">${esc(s.detail)}</div>
           </div>
           <button class="btn btn-outline btn-sm" style="color:#fff;border-color:rgba(255,255,255,.4);" data-action="goto-suggestion" data-tab="${s.tab}" ${s.section?`data-section="${s.section}"`:''}>Đi tới →</button>
-        </div>`).join('')}
+        </div>`;
+      }).join('')}
     </div>
 
     ${renderSyncCard()}
@@ -1238,7 +1384,7 @@ function renderSession(){
     const pendingSet = {}; pending.forEach(p=> pendingSet[p.id]=true);
     const types = sess.exerciseTypes || [];
     const exercises = sess.exercises || [];
-    const colCount = 4 + types.length + exercises.length; // Học sinh + Điểm danh + Đánh giá + Chép phạt + Ghi chú + động
+    const colCount = 3 + types.length + exercises.length; // Học sinh + Điểm danh + Chép phạt + Ghi chú + động
 
     const sortKey = state.session.sortKey || 'default';
     const sortDir = state.session.sortDir || 'desc';
@@ -1247,7 +1393,7 @@ function renderSession(){
       if(sortKey==='avg') return sessionScoreAvg(sess, studentId);
       if(sortExercise){
         const raw = (sess.scores[studentId]||{})[sortExercise.id];
-        return scoreOn10(raw, exerciseTotal(sortExercise));
+        return exerciseScoreOn10(sortExercise, raw);
       }
       return null;
     }
@@ -1296,29 +1442,13 @@ function renderSession(){
       </div>
 
       <div class="card">
-        <div class="card-title">⚙️ Thiết lập cột cho bảng buổi học</div>
-        <div class="grid-2">
-          <div>
-            <label class="field-label">Checklist bài tập</label>
-            <div class="chip-row" style="margin-bottom:8px;">
-              ${types.map(t=>`<div class="chip">${esc(t.name)} <button data-action="del-extype" data-id="${t.id}">×</button></div>`).join('') || `<span class="tiny">Chưa có loại bài nào.</span>`}
-            </div>
-            <div style="display:flex; gap:8px;">
-              <input type="text" id="new-extype" placeholder="VD: Phiếu bài tập, Đặt câu...">
-              <button class="btn btn-outline btn-sm" data-action="add-extype">+ Thêm</button>
-            </div>
-          </div>
-          <div>
-            <label class="field-label">Bài luyện tập (nhập số câu đúng)</label>
-            <div class="chip-row" style="margin-bottom:8px;">
-              ${exercises.map(e=>`<div class="chip">${esc(e.name)} · ${exerciseTotal(e)} câu <button data-action="del-exercise" data-id="${e.id}">×</button></div>`).join('') || `<span class="tiny">Chưa có bài luyện tập nào.</span>`}
-            </div>
-            <div style="display:flex; gap:8px;">
-              <input type="text" id="new-exercise" placeholder="VD: Bài luyện nói..." style="flex:2;">
-              <input type="number" id="new-exercise-total" placeholder="Số câu" min="1" step="1" style="flex:1;min-width:80px;">
-              <button class="btn btn-outline btn-sm" data-action="add-exercise">+ Thêm</button>
-            </div>
-          </div>
+        <div class="card-title">⚙️ Thiết lập Checklist bài tập</div>
+        <div class="chip-row" style="margin-bottom:8px;">
+          ${types.map(t=>`<div class="chip">${esc(t.name)} <button data-action="del-extype" data-id="${t.id}">×</button></div>`).join('') || `<span class="tiny">Chưa có loại bài nào.</span>`}
+        </div>
+        <div style="display:flex; gap:8px; max-width:420px;">
+          <input type="text" id="new-extype" placeholder="VD: Phiếu bài tập, Đặt câu...">
+          <button class="btn btn-outline btn-sm" data-action="add-extype">+ Thêm</button>
         </div>
       </div>
 
@@ -1341,6 +1471,22 @@ function renderSession(){
           </div>
         </div>
         <div class="muted" style="margin-bottom:10px;">Checklist: bấm ô để chuyển Chưa làm → Làm thiếu → Đầy đủ. Dùng nút "Tick tất cả" ở tiêu đề cột để làm nhanh cả lớp, rồi chỉnh lại từng em ngoại lệ. Cuộn ngang nếu bảng rộng hơn màn hình — cột "Học sinh" luôn cố định.</div>
+
+        <div style="border:1px solid var(--line); border-radius:8px; padding:10px 12px; margin-bottom:14px; background:var(--surface-alt);">
+          <div class="chip-row" style="margin-bottom:${exercises.length?'8px':'0'};">
+            ${exercises.map(e=>`<div class="chip">${esc(e.name)} · ${exerciseMode(e)==='scale10' ? 'thang 10' : exerciseTotal(e)+' câu'} <button data-action="del-exercise" data-id="${e.id}">×</button></div>`).join('')}
+          </div>
+          <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
+            <input type="text" id="new-exercise" placeholder="+ Tên bài luyện tập mới..." style="flex:2;min-width:140px;">
+            <select id="new-exercise-mode" style="flex:1;min-width:150px;">
+              <option value="fraction">Theo số câu đúng/tổng</option>
+              <option value="scale10">Thang 10</option>
+            </select>
+            <input type="number" id="new-exercise-total" placeholder="Tổng số câu" min="1" step="1" style="flex:1;min-width:90px;">
+            <button class="btn btn-outline btn-sm" data-action="add-exercise">+ Thêm bài luyện tập</button>
+          </div>
+        </div>
+
         <div style="overflow-x:auto;">
         <table class="session-table" style="min-width:${560 + (types.length+exercises.length)*90}px;">
           <thead>
@@ -1352,10 +1498,6 @@ function renderSession(){
               </th>
               ${types.length? `<th colspan="${types.length}" style="text-align:center;">Checklist bài tập</th>` : ''}
               ${exercises.length? `<th colspan="${exercises.length}" style="text-align:center;">Điểm luyện tập</th>` : ''}
-              <th rowspan="2" style="min-width:150px;">
-                Đánh giá<br>
-                <button class="btn btn-outline btn-sm" data-action="tick-all-rating" style="margin-top:4px;font-size:10.5px;padding:3px 7px;font-weight:600;text-transform:none;letter-spacing:0;">5★ tất cả</button>
-              </th>
               <th rowspan="2" style="min-width:130px;">📌 Chép phạt</th>
               <th rowspan="2" style="min-width:170px;">Ghi chú riêng</th>
             </tr>
@@ -1364,7 +1506,7 @@ function renderSession(){
                 ${esc(t.name)}<br>
                 <button class="btn btn-outline btn-sm" data-action="tick-all-checklist" data-type="${t.id}" style="margin-top:4px;font-size:10.5px;padding:3px 6px;font-weight:600;text-transform:none;letter-spacing:0;">✓ Đủ tất cả</button>
               </th>`).join('')}
-              ${exercises.map(e=>`<th style="text-align:center;min-width:90px;">${esc(e.name)}<div class="tiny" style="text-transform:none;letter-spacing:0;">(${exerciseTotal(e)} câu)</div></th>`).join('')}
+              ${exercises.map(e=>`<th style="text-align:center;min-width:90px;">${esc(e.name)}<div class="tiny" style="text-transform:none;letter-spacing:0;">(${exerciseMode(e)==='scale10' ? 'thang 10' : exerciseTotal(e)+' câu'})</div></th>`).join('')}
             </tr>
           </thead>
           <tbody>
@@ -1373,7 +1515,6 @@ function renderSession(){
             const owes = pendingSet[st.id] || false;
             const done = !!(sess.punishmentDone||{})[st.id];
             const assigned = !!(sess.punishmentAssigned||{})[st.id];
-            const r = sess.rating[st.id] || 5;
             return `<tr class="ledger ${warnSet[st.id]||owes?'flagged':''}">
               <td><b>${esc(st.name)}</b>${exercises.length? (()=>{ const v = sortKey!=='default'? sortValueOf(st.id) : sessionScoreAvg(sess, st.id); return v!==null? ` <span class="tiny mono" style="color:var(--ink-soft);">(${v.toFixed(1)})</span>` : ''; })() : ''}</td>
               <td>
@@ -1389,19 +1530,22 @@ function renderSession(){
                 return `<td style="text-align:center;"><div class="tick ${v}" data-action="cycle-check" data-student="${st.id}" data-type="${t.id}">${label}</div></td>`;
               }).join('')}
               ${exercises.map(e=>{
+                const mode = exerciseMode(e);
                 const total = exerciseTotal(e);
                 const v = (sess.scores[st.id]||{})[e.id];
-                const computed = scoreOn10(v, total);
+                if(mode==='scale10'){
+                  return `<td style="text-align:center;">
+                    <input class="score-input" type="number" min="0" max="10" step="0.1" value="${v!==undefined?v:''}" placeholder="0-10" data-action="set-score" data-student="${st.id}" data-exercise="${e.id}" data-total="${total}" data-mode="scale10">
+                  </td>`;
+                }
+                const computed = exerciseScoreOn10(e, v);
                 return `<td style="text-align:center;">
                   <div style="display:flex;flex-direction:column;align-items:center;gap:2px;">
-                    <input class="score-input" type="number" min="0" max="${total}" step="1" value="${v!==undefined?v:''}" placeholder="0-${total}" data-action="set-score" data-student="${st.id}" data-exercise="${e.id}" data-total="${total}">
+                    <input class="score-input" type="number" min="0" max="${total}" step="1" value="${v!==undefined?v:''}" placeholder="0-${total}" data-action="set-score" data-student="${st.id}" data-exercise="${e.id}" data-total="${total}" data-mode="fraction">
                     <span class="tiny mono score-computed">${computed!==null? computed.toFixed(1)+'/10' : '—'}</span>
                   </div>
                 </td>`;
               }).join('')}
-              <td>
-                <div class="rating-row">${[1,2,3,4,5].map(n=>`<div class="rating-dot ${n<=r?'on':''}" data-action="set-rating" data-student="${st.id}" data-value="${n}">${n}</div>`).join('')}</div>
-              </td>
               <td>
                 <div style="display:flex; flex-direction:column; gap:4px; font-size:12.5px;">
                   ${owes? `<label style="display:flex;align-items:center;gap:4px;cursor:pointer;color:var(--danger);"><input type="checkbox" ${done?'checked':''} data-action="toggle-punishment-done" data-student="${st.id}"> Đã KT</label>` : ''}
@@ -1774,15 +1918,15 @@ function renderReport(){
           <th>Nội dung học</th>
           <th>BTVN</th>
           <th style="width:75px;text-align:center;">Điểm TB</th>
-          <th style="width:80px;text-align:center;">Ý thức</th>
+          <th style="width:90px;text-align:center;">Điểm danh</th>
           <th>Nhận xét / Ghi chú</th>
           <th class="no-print" style="width:70px;text-align:center;">Chỉnh sửa</th>
         </tr></thead>
         <tbody>
         ${allSessions.map((s,i)=>{
           const attStatus = s.attendance[studentId] || null;
-          const isAbsent = attStatus==='absent';
-          const rating = s.rating[studentId] || 5;
+          const attLabel = attStatus==='present'?'Có mặt': attStatus==='absent'?'Vắng': attStatus==='late'?'Muộn':'—';
+          const attColor = attStatus==='present'?'var(--success)': attStatus==='absent'?'var(--danger)': attStatus==='late'?'var(--late)':'var(--ink-soft)';
           const scoreAvg = sessionScoreAvg(s, studentId);
           // Gộp ghi chú riêng của em + nhận xét nền nếp chung của buổi (2 ô "Ghi chú" trong tab Buổi học)
           const noteParts = [];
@@ -1795,7 +1939,7 @@ function renderReport(){
             <td class="note-text">${esc(s.content||'—')}</td>
             <td class="note-text">${esc(s.homework||'—')}</td>
             <td class="mono" style="text-align:center;">${scoreAvg!==null? scoreAvg.toFixed(1) : '—'}</td>
-            <td style="text-align:center;">${isAbsent ? `<span style="color:var(--danger);font-weight:700;">Vắng</span>` : `<span class="mono">${rating}/5</span>`}</td>
+            <td class="mono" style="text-align:center;color:${attColor};font-weight:700;">${attLabel}</td>
             <td class="note-text">${esc(note||'—')}</td>
             <td class="no-print" style="text-align:center;"><button class="btn btn-outline btn-sm" data-action="goto-session-date" data-class="${classId}" data-date="${s.date}">✎ Sửa</button></td>
           </tr>`;
@@ -1857,13 +2001,12 @@ function renderProgress(){
           </div>
           ${chartSvg}
           <div class="legend"><span><i style="background:var(--accent-deep);"></i>${esc(st.name)}</span><span><i style="background:var(--ink-faint);"></i>Trung bình lớp</span></div>
-          <table style="margin-top:16px;"><thead><tr><th>Buổi</th><th>Điểm TB</th><th>Đánh giá</th><th>Ghi chú</th></tr></thead><tbody>
+          <table style="margin-top:16px;"><thead><tr><th>Buổi</th><th>Điểm TB</th><th>Ghi chú</th></tr></thead><tbody>
           ${getSessions(classId).map(s=>{
             const sc = sessionScoreAvg(s, studentId);
-            const r = s.rating[studentId];
             const note = s.studentNotes[studentId];
-            if(sc===null && !r && !note) return '';
-            return `<tr class="ledger"><td>${fmtDateVN(s.date)}</td><td class="mono">${sc!==null?sc.toFixed(1):'—'}</td><td>${r?r+'/5':'—'}</td><td class="note-text">${esc(note||'')}</td></tr>`;
+            if(sc===null && !note) return '';
+            return `<tr class="ledger"><td>${fmtDateVN(s.date)}</td><td class="mono">${sc!==null?sc.toFixed(1):'—'}</td><td class="note-text">${esc(note||'')}</td></tr>`;
           }).join('')}
           </tbody></table>
         </div>`;
@@ -2767,16 +2910,33 @@ function renderViolationsSection(classId, cls){
   }
   const rows = cls.students.map(s=>{
     const log = (s.violations||[]).slice().sort((a,b)=> b.date.localeCompare(a.date));
-    return {id:s.id, name:s.name, count: log.length, last: log[0]};
+    const totalPoints = log.reduce((a,b)=> a+(b.points!==undefined?b.points:5), 0);
+    return {id:s.id, name:s.name, count: log.length, totalPoints, last: log[0]};
+  });
+  const sortKey = state.violationsSort || 'count-desc';
+  const [sortField, sortDir] = sortKey.split('-');
+  const sorted = rows.slice().sort((a,b)=>{
+    const va = sortField==='points' ? a.totalPoints : a.count;
+    const vb = sortField==='points' ? b.totalPoints : b.count;
+    return sortDir==='asc' ? va-vb : vb-va;
   });
   return `
     <div class="card">
-      <div class="card-title">Danh sách học sinh — ${esc(cls.name)}</div>
-      <table><thead><tr><th>Học sinh</th><th>Số lần vi phạm</th><th>Lần gần nhất</th><th></th></tr></thead><tbody>
-      ${rows.map(r=>`
+      <div class="card-title">
+        <span>Danh sách học sinh — ${esc(cls.name)}</span>
+        <select data-action="violations-change-sort" style="width:auto;">
+          <option value="count-desc" ${sortKey==='count-desc'?'selected':''}>Số lần vi phạm: Cao → Thấp</option>
+          <option value="count-asc" ${sortKey==='count-asc'?'selected':''}>Số lần vi phạm: Thấp → Cao</option>
+          <option value="points-desc" ${sortKey==='points-desc'?'selected':''}>Điểm bị trừ: Cao → Thấp</option>
+          <option value="points-asc" ${sortKey==='points-asc'?'selected':''}>Điểm bị trừ: Thấp → Cao</option>
+        </select>
+      </div>
+      <table><thead><tr><th>Học sinh</th><th style="text-align:center;">Số lần vi phạm</th><th style="text-align:center;">Tổng điểm bị trừ</th><th>Lần gần nhất</th><th></th></tr></thead><tbody>
+      ${sorted.map(r=>`
         <tr class="ledger ${r.count>=3?'flagged':''}" style="cursor:pointer;" data-action="violations-select" data-student="${r.id}">
           <td>${esc(r.name)}</td>
-          <td class="mono">${r.count}</td>
+          <td class="mono" style="text-align:center;">${r.count}</td>
+          <td class="mono" style="text-align:center;color:${r.totalPoints>0?'var(--danger)':'var(--ink-soft)'};">${r.totalPoints>0? '−'+r.totalPoints : '—'}</td>
           <td class="mono">${r.last? fmtDateVN(r.last.date) : '—'}</td>
           <td style="text-align:right;"><button class="btn btn-outline btn-sm" data-action="violations-select" data-student="${r.id}">Xem / Thêm</button></td>
         </tr>`).join('')}
@@ -3073,11 +3233,10 @@ function renderTeamsSection(classId, cls){
 
     <div class="card">
       <div class="card-title">Phân tổ học sinh</div>
-      <div class="muted" style="margin-bottom:10px;">⭐ cạnh tên = thành viên tích cực trong tháng (dựa theo mức nhiệt tình hoạt động phong trào ≥ 4⭐).</div>
-      <table><thead><tr><th>Học sinh</th><th>Tổ</th><th style="text-align:center;">Điểm tổ (tháng này)</th><th style="text-align:center;">Hạng tổ</th></tr></thead><tbody>
+      <div class="muted" style="margin-bottom:10px;">⭐ cạnh tên = thành viên tích cực trong tháng (tổng điểm cộng từ hoạt động phong trào ≥ 8).</div>
+      <table><thead><tr><th>Học sinh</th><th>Tổ</th><th style="text-align:center;">Hạng tổ</th></tr></thead><tbody>
       ${cls.students.map(s=>{
         const rank = s.teamId ? results.findIndex(t=>t.id===s.teamId)+1 : 0;
-        const teamResult = s.teamId ? results.find(t=>t.id===s.teamId) : null;
         const active = isStudentActiveThisMonth(s, month);
         return `
         <tr class="ledger">
@@ -3088,7 +3247,6 @@ function renderTeamsSection(classId, cls){
               ${teams.map(t=>`<option value="${t.id}" ${s.teamId===t.id?'selected':''}>${esc(t.name)}</option>`).join('')}
             </select>
           </td>
-          <td class="mono" style="text-align:center;">${teamResult? teamResult.cur.score : '—'}</td>
           <td class="mono" style="text-align:center;">${rank? (medal[rank-1]||('#'+rank)) : '—'}</td>
         </tr>`;
       }).join('')}
@@ -3991,8 +4149,6 @@ function buildZaloMessage(classId, studentId){
   const att = studentAttendanceStats(classId, studentId);
   const series = studentScoreSeries(classId, studentId);
   const avgScore = series.length? (series.reduce((a,b)=>a+b.score,0)/series.length) : null;
-  const ratings = getSessions(classId).map(s=>s.rating[studentId]).filter(r=>r);
-  const avgRating = ratings.length? (ratings.reduce((a,b)=>a+b,0)/ratings.length) : null;
   const cl = studentChecklistStats(classId, studentId);
   const remark = generateRemark(classId, studentId);
 
@@ -4003,7 +4159,6 @@ function buildZaloMessage(classId, studentId){
   lines.push(`✅ Chuyên cần: ${att.rate!==null? att.rate+'%':'chưa có dữ liệu'} (có mặt ${att.present}, vắng ${att.absent}, muộn ${att.late})`);
   lines.push(`📊 Điểm trung bình: ${avgScore!==null? avgScore.toFixed(1)+'/10':'chưa có dữ liệu'}`);
   lines.push(`📝 Hoàn thành bài tập: ${cl.rate!==null? cl.rate+'%':'chưa có dữ liệu'}`);
-  lines.push(`⭐ Đánh giá thái độ học TB: ${avgRating!==null? avgRating.toFixed(1)+'/5':'chưa có dữ liệu'}`);
   lines.push('');
   lines.push(`Nhận xét: ${remark || 'Chưa có đủ dữ liệu để nhận xét.'}`);
   lines.push('');
@@ -4183,14 +4338,12 @@ function buildSessionReportPrompt(classId, date){
       const s10 = scoreOn10(raw, total);
       return `${e.name}: ${raw!==undefined && raw!==null ? raw+'/'+total+' câu ('+s10.toFixed(1)+'/10)' : 'chưa chấm'}`;
     }).join(', ') : '';
-    const rating = session.rating[st.id] || 5;
     const note = session.studentNotes[st.id] || '';
     const owesPunish = studentOwesPunishment(classId, st.id, date) || (session.punishmentAssigned && session.punishmentAssigned[st.id]);
 
     const parts = [`- ${st.name}: Điểm danh ${attLabel}`];
     if(checklistPart) parts.push(`Checklist [${checklistPart}]`);
     if(scorePart) parts.push(`Điểm [${scorePart}]`);
-    parts.push(`Đánh giá ${rating}/5`);
     if(owesPunish) parts.push('⚠ Có chép phạt cần theo dõi');
     if(note) parts.push(`Ghi chú: ${note}`);
     L.push(parts.join(' · '));
@@ -4326,6 +4479,14 @@ function attachHandlers(){
     });
   });
 
+  const exModeSel = app.querySelector('#new-exercise-mode');
+  const exTotalInput = app.querySelector('#new-exercise-total');
+  if(exModeSel && exTotalInput){
+    const syncExMode = ()=>{ exTotalInput.style.display = exModeSel.value==='scale10' ? 'none' : ''; };
+    syncExMode();
+    exModeSel.addEventListener('change', syncExMode);
+  }
+
   const modalInput = app.querySelector('#modal-input');
   if(modalInput){
     modalInput.addEventListener('keydown', (ev)=>{
@@ -4344,6 +4505,11 @@ function attachHandlers(){
   const recSearch = app.querySelector('[data-action="records-search"]');
   if(recSearch){
     recSearch.addEventListener('input', (e)=>{ state.records.search = e.target.value; render(); setTimeout(()=>{ const i=app.querySelector('[data-action="records-search"]'); if(i){ i.focus(); i.setSelectionRange(i.value.length,i.value.length);} },0); });
+  }
+  const globalSearchInput = app.querySelector('#global-student-search');
+  if(globalSearchInput){
+    globalSearchInput.addEventListener('input', (e)=>{ state.globalSearch = e.target.value; render(); setTimeout(()=>{ const i=app.querySelector('#global-student-search'); if(i){ i.focus(); i.setSelectionRange(i.value.length,i.value.length);} },0); });
+    globalSearchInput.addEventListener('keydown', (e)=>{ if(e.key==='Escape'){ state.globalSearch=''; render(); } });
   }
   const backupInput = app.querySelector('#backup-file-input');
   if(backupInput){
@@ -4474,6 +4640,13 @@ async function handleAction(action, elx, e){
       const today = todayISO();
       if(!state.dailyTasks[today]) state.dailyTasks[today] = {};
       state.dailyTasks[today][elx.dataset.task] = elx.checked;
+      render(); saveDailyTasks();
+      break;
+    }
+    case 'toggle-suggestion-done': {
+      const today = todayISO();
+      if(!state.dailyTasks[today]) state.dailyTasks[today] = {};
+      state.dailyTasks[today][elx.dataset.id] = elx.checked;
       render(); saveDailyTasks();
       break;
     }
@@ -4657,13 +4830,6 @@ async function handleAction(action, elx, e){
       showToast('Đã tick cả lớp là Đầy đủ.');
       break;
     }
-    case 'tick-all-rating': {
-      const sess = ensureSessionEditable();
-      getStudents(state.currentClassId).forEach(st=>{ sess.rating[st.id] = 5; });
-      render(); saveSessions(state.currentClassId);
-      showToast('Đã đặt đánh giá cả lớp về 5★.');
-      break;
-    }
     case 'add-extype': {
       const input = document.getElementById('new-extype');
       if(input && input.value.trim()){
@@ -4692,15 +4858,20 @@ async function handleAction(action, elx, e){
     }
     case 'add-exercise': {
       const input = document.getElementById('new-exercise');
+      const modeSel = document.getElementById('new-exercise-mode');
       const totalInput = document.getElementById('new-exercise-total');
       const name = input ? input.value.trim() : '';
-      const total = totalInput ? parseInt(totalInput.value, 10) : NaN;
-      if(name && total>0){
-        const sess = ensureSessionEditable();
-        sess.exercises.push({id:uid(), name, totalQuestions: total});
+      const mode = modeSel ? modeSel.value : 'fraction';
+      if(!name){ showToast('Nhập tên bài luyện tập nhé.'); break; }
+      const sess = ensureSessionEditable();
+      if(mode==='scale10'){
+        sess.exercises.push({id:uid(), name, mode:'scale10'});
         render(); saveSessions(state.currentClassId);
       } else {
-        showToast('Nhập tên bài và tổng số câu (lớn hơn 0) nhé.');
+        const total = totalInput ? parseInt(totalInput.value, 10) : NaN;
+        if(!(total>0)){ showToast('Nhập tổng số câu (lớn hơn 0) nhé.'); break; }
+        sess.exercises.push({id:uid(), name, mode:'fraction', totalQuestions: total});
+        render(); saveSessions(state.currentClassId);
       }
       break;
     }
@@ -4726,17 +4897,16 @@ async function handleAction(action, elx, e){
       const sess = ensureSessionEditable();
       const sid = elx.dataset.student, exid = elx.dataset.exercise;
       const total = Number(elx.dataset.total) || 10;
+      const mode = elx.dataset.mode || 'fraction';
       if(!sess.scores[sid]) sess.scores[sid] = {};
       const val = elx.value;
       if(val===''){ delete sess.scores[sid][exid]; }
-      else { sess.scores[sid][exid] = clamp(Math.round(Number(val)),0,total); }
+      else if(mode==='scale10'){
+        sess.scores[sid][exid] = Math.round(clamp(Number(val),0,10)*10)/10;
+      } else {
+        sess.scores[sid][exid] = clamp(Math.round(Number(val)),0,total);
+      }
       saveSessions(state.currentClassId);
-      break;
-    }
-    case 'set-rating': {
-      const sess = ensureSessionEditable();
-      sess.rating[elx.dataset.student] = Number(elx.dataset.value);
-      render(); saveSessions(state.currentClassId);
       break;
     }
     case 'toggle-punishment-done': {
@@ -4767,6 +4937,24 @@ async function handleAction(action, elx, e){
     case 'goto-report':
       state.report.classId = elx.dataset.class; state.report.studentId = elx.dataset.student; state.report.mode='student';
       state.tab = 'report'; render(); break;
+    case 'goto-student-profile':
+      state.studentProfileId = elx.dataset.student; state.globalSearch=''; state.tab = 'studentProfile'; render(); break;
+    case 'close-student-profile':
+      state.studentProfileId = null; state.tab = 'home'; render(); break;
+    case 'goto-report-profile':
+      state.report.classId = elx.dataset.class; state.report.studentId = elx.dataset.student; state.report.mode='student';
+      state.tab = 'report'; render(); break;
+    case 'goto-violations-profile':
+      state.currentClassId = elx.dataset.class; state.homeroom.classId = elx.dataset.class;
+      state.homeroom.section = 'violations'; state.homeroom.violationStudentId = elx.dataset.student;
+      state.tab = 'homeroom'; render(); break;
+    case 'goto-activities-profile':
+      state.currentClassId = elx.dataset.class; state.homeroom.classId = elx.dataset.class;
+      state.homeroom.section = 'activities'; state.homeroom.activityStudentId = elx.dataset.student;
+      state.tab = 'homeroom'; render(); break;
+    case 'goto-contacts-profile':
+      state.currentClassId = elx.dataset.class; state.contacts.classId = elx.dataset.class; state.contacts.studentId = elx.dataset.student;
+      state.tab = 'contacts'; render(); break;
     case 'export-doc': exportWordDoc(); break;
     case 'copy-zalo': copyZaloMessage(elx.dataset.class, elx.dataset.student); break;
 
@@ -5018,6 +5206,7 @@ async function handleAction(action, elx, e){
     /* ---- Vi phạm nội quy ---- */
     case 'violations-select': state.homeroom.violationStudentId = elx.dataset.student; render(); break;
     case 'violations-back': state.homeroom.violationStudentId = null; render(); break;
+    case 'violations-change-sort': state.violationsSort = elx.value; render(); break;
     case 'add-violation': {
       const classId = elx.dataset.class, studentId = elx.dataset.student;
       const dateEl = document.getElementById('violation-date');
