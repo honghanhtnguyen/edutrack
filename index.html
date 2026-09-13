@@ -1516,7 +1516,7 @@ function renderSession(){
             const done = !!(sess.punishmentDone||{})[st.id];
             const assigned = !!(sess.punishmentAssigned||{})[st.id];
             return `<tr class="ledger ${warnSet[st.id]||owes?'flagged':''}">
-              <td><b>${esc(st.name)}</b>${exercises.length? (()=>{ const v = sortKey!=='default'? sortValueOf(st.id) : sessionScoreAvg(sess, st.id); return v!==null? ` <span class="tiny mono" style="color:var(--ink-soft);">(${v.toFixed(1)})</span>` : ''; })() : ''}</td>
+              <td><b>${esc(st.name)}</b></td>
               <td>
                 <div class="seg" data-attendance-group="${st.id}">
                   <button class="${a==='present'?'on present':''}" title="Có mặt" data-action="set-att" data-student="${st.id}" data-value="present">✓</button>
@@ -1559,6 +1559,29 @@ function renderSession(){
         </table>
         </div>
       </div>
+
+      ${exercises.length ? `
+      <div class="card">
+        <div class="card-title">📊 Tổng kết buổi</div>
+        <div class="muted" style="margin-bottom:10px;">Điểm cao nhất/thấp nhất/trung bình của cả lớp cho từng bài luyện tập — tự cập nhật ngay khi cô nhập điểm ở bảng trên.</div>
+        <table>
+          <thead><tr><th>Bài luyện tập</th><th style="text-align:center;">Cao nhất</th><th style="text-align:center;">Thấp nhất</th><th style="text-align:center;">Trung bình lớp</th></tr></thead>
+          <tbody>
+          ${exercises.map(e=>{
+            const vals = students.map(st=>exerciseScoreOn10(e, (sess.scores[st.id]||{})[e.id])).filter(v=>v!==null);
+            const max = vals.length? Math.max(...vals) : null;
+            const min = vals.length? Math.min(...vals) : null;
+            const avg = vals.length? vals.reduce((a,b)=>a+b,0)/vals.length : null;
+            return `<tr class="ledger" data-summary-exercise="${e.id}">
+              <td>${esc(e.name)}</td>
+              <td class="mono summary-max" style="text-align:center;">${max!==null?max.toFixed(1):'—'}</td>
+              <td class="mono summary-min" style="text-align:center;">${min!==null?min.toFixed(1):'—'}</td>
+              <td class="mono summary-avg" style="text-align:center;font-weight:700;color:var(--accent-deep);">${avg!==null?avg.toFixed(1):'—'}</td>
+            </tr>`;
+          }).join('')}
+          </tbody>
+        </table>
+      </div>` : ''}
     `;
   }
 
@@ -4466,16 +4489,34 @@ function attachHandlers(){
     elx.addEventListener('blur', ()=> handleFieldChange(elx));
   });
 
-  // cập nhật ngay hiển thị "x.x/10" khi gõ số câu đúng, không cần render lại cả trang
+  // cập nhật ngay hiển thị "x.x/10" khi gõ số câu đúng, và cập nhật luôn bảng Tổng kết buổi (Cao nhất/Thấp nhất/TB lớp) của đúng bài đó
+  function recomputeExerciseSummary(exerciseId){
+    const inputs = app.querySelectorAll('.score-input[data-exercise="'+exerciseId+'"]');
+    const vals = [];
+    inputs.forEach(inp=>{
+      if(inp.value==='') return;
+      if(inp.dataset.mode==='scale10'){ vals.push(clamp(Number(inp.value),0,10)); }
+      else { const total = Number(inp.dataset.total)||10; vals.push(clamp(Number(inp.value),0,total)/total*10); }
+    });
+    const row = app.querySelector('[data-summary-exercise="'+exerciseId+'"]');
+    if(!row) return;
+    const maxEl = row.querySelector('.summary-max'), minEl = row.querySelector('.summary-min'), avgEl = row.querySelector('.summary-avg');
+    if(maxEl) maxEl.textContent = vals.length ? Math.max(...vals).toFixed(1) : '—';
+    if(minEl) minEl.textContent = vals.length ? Math.min(...vals).toFixed(1) : '—';
+    if(avgEl) avgEl.textContent = vals.length ? (vals.reduce((a,b)=>a+b,0)/vals.length).toFixed(1) : '—';
+  }
   app.querySelectorAll('.score-input').forEach(inp=>{
     inp.addEventListener('input', ()=>{
-      const total = Number(inp.dataset.total) || 10;
-      const span = inp.parentElement && inp.parentElement.querySelector('.score-computed');
-      if(!span) return;
-      const val = inp.value;
-      if(val===''){ span.textContent = '—'; return; }
-      const c = clamp(Number(val), 0, total);
-      span.textContent = ((c/total)*10).toFixed(1)+'/10';
+      if(inp.dataset.mode!=='scale10'){
+        const total = Number(inp.dataset.total) || 10;
+        const span = inp.parentElement && inp.parentElement.querySelector('.score-computed');
+        if(span){
+          const val = inp.value;
+          if(val===''){ span.textContent = '—'; }
+          else { const c = clamp(Number(val), 0, total); span.textContent = ((c/total)*10).toFixed(1)+'/10'; }
+        }
+      }
+      recomputeExerciseSummary(inp.dataset.exercise);
     });
   });
 
