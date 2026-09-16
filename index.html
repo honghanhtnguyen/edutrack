@@ -1742,81 +1742,60 @@ function buildSessionInfographicPrompt(classId, date){
   const students = cls.students;
   const types = session.exerciseTypes || [];
   const exercises = session.exercises || [];
+  const hasNote = !!(session.generalNote && session.generalNote.trim());
 
   const L = [];
-  L.push('Bạn là trợ lý giúp giáo viên tạo INFOGRAPHIC BÁO CÁO TỔNG KẾT BUỔI HỌC để gửi phụ huynh, dựa trên đúng dữ liệu thực tế bên dưới — không bịa thêm số liệu.');
+  L.push('Bạn là trợ lý tạo INFOGRAPHIC BÁO CÁO TỔNG KẾT BUỔI HỌC gửi phụ huynh, dùng đúng số liệu dưới đây, không bịa thêm.');
   L.push('');
-  L.push('=== DỮ LIỆU BUỔI HỌC ===');
-  L.push(`Lớp: ${cls.name}`);
-  L.push(`Ngày học: ${fmtDateVN(date)}`);
-  L.push(`Giáo viên: ${state.teacherName || '(chưa nhập tên)'}`);
+  L.push('=== DỮ LIỆU ===');
+  L.push(`Lớp: ${cls.name} · Ngày: ${fmtDateVN(date)} · GV: ${state.teacherName || '(chưa nhập)'}`);
   L.push(`Nội dung bài học: ${session.content || '(chưa nhập)'}`);
-  L.push(`Bài tập về nhà giao: ${session.homework || '(chưa nhập)'}`);
+  L.push(`BTVN giao: ${session.homework || '(chưa nhập)'}`);
+  if(hasNote) L.push(`Lưu ý cho buổi học: ${session.generalNote.trim()}`);
   L.push('');
 
-  // Điểm danh: chỉ liệt kê học sinh vắng/muộn, không liệt kê người có mặt
   const absentees = students.map(st=>({name:st.name, status:session.attendance[st.id]})).filter(x=>x.status==='absent'||x.status==='late');
-  L.push('Điểm danh (chỉ liệt kê học sinh vắng/muộn, còn lại coi như có mặt đầy đủ):');
-  if(absentees.length){
-    absentees.forEach(x=> L.push(`- ${x.name}: ${x.status==='absent'?'Vắng':'Muộn'}`));
-  } else {
-    L.push('Không có học sinh nào vắng hoặc đi muộn — cả lớp có mặt đầy đủ.');
-  }
+  L.push('Điểm danh (chỉ ghi học sinh vắng/muộn, còn lại mặc định có mặt):');
+  L.push(absentees.length ? absentees.map(x=>`${x.name} (${x.status==='absent'?'Vắng':'Muộn'})`).join(', ') : 'Cả lớp có mặt đầy đủ.');
 
-  // BTVN: gộp theo TỪNG LOẠI BÀI còn thiếu (đầu mục), bên dưới liệt kê tên học sinh thiếu bài đó — tránh lặp lại tên loại bài nhiều lần, tối ưu không gian
   if(types.length){
     L.push('');
-    L.push('Bài tập về nhà (gộp theo từng loại bài còn thiếu, bên dưới là tên học sinh thiếu bài đó):');
-    let anyMissing = false;
+    L.push('BTVN còn thiếu (gộp theo đầu mục, tên HS liệt kê dưới mỗi mục):');
+    let any = false;
     types.forEach(t=>{
-      const missingNames = students.filter(st=>{
-        const rec = session.checklist[st.id] || {};
-        return (rec[t.id]||'none') !== 'full';
-      }).map(st=>st.name);
-      if(missingNames.length){
-        anyMissing = true;
-        L.push(`${t.name}: ${missingNames.join(', ')}`);
-      }
+      const names = students.filter(st=>((session.checklist[st.id]||{})[t.id]||'none')!=='full').map(st=>st.name);
+      if(names.length){ any=true; L.push(`${t.name}: ${names.join(', ')}`); }
     });
-    if(!anyMissing){
-      L.push('Không có học sinh nào thiếu bài — cả lớp hoàn thành đầy đủ.');
-    }
+    if(!any) L.push('Cả lớp hoàn thành đầy đủ.');
   }
 
-  // Điểm: liệt kê điểm từng em (gọn, trực quan) + kèm dòng tổng kết Cao nhất/Thấp nhất/TB lớp cho mỗi đầu điểm
   if(exercises.length){
     exercises.forEach(e=>{
-      L.push('');
-      L.push(`Kết quả bài "${e.name}" (điểm từng học sinh):`);
       const scored = students.map(st=>({name:st.name, score:exerciseScoreOn10(e,(session.scores[st.id]||{})[e.id])})).filter(x=>x.score!==null);
+      L.push('');
+      L.push(`Điểm "${e.name}":`);
       if(!scored.length){ L.push('Chưa có điểm.'); return; }
-      scored.forEach(x=> L.push(`- ${x.name}: ${x.score.toFixed(1)} điểm`));
-      const max = Math.max(...scored.map(x=>x.score));
-      const min = Math.min(...scored.map(x=>x.score));
+      L.push(scored.map(x=>`${x.name}: ${x.score.toFixed(1)}`).join(' · '));
+      const max = Math.max(...scored.map(x=>x.score)), min = Math.min(...scored.map(x=>x.score));
       const avg = scored.reduce((a,b)=>a+b.score,0)/scored.length;
-      const topNames = scored.filter(x=>x.score===max).map(x=>x.name).join(', ');
-      const lowNames = scored.filter(x=>x.score===min).map(x=>x.name).join(', ');
-      L.push(`Tổng kết: Cao nhất ${max.toFixed(1)} điểm (${topNames}) · Thấp nhất ${min.toFixed(1)} điểm (${lowNames}) · Trung bình lớp ${avg.toFixed(1)} điểm`);
+      const top = scored.filter(x=>x.score===max).map(x=>x.name).join(', ');
+      const low = scored.filter(x=>x.score===min).map(x=>x.name).join(', ');
+      L.push(`Tổng kết: Cao nhất ${max.toFixed(1)} (${top}) · Thấp nhất ${min.toFixed(1)} (${low}) · TB lớp ${avg.toFixed(1)}`);
     });
   }
 
   L.push('');
-  L.push('=== YÊU CẦU THIẾT KẾ INFOGRAPHIC ===');
-  L.push('Tạo một infographic báo cáo tổng kết buổi học, phong cách flat design hiện đại, bố cục dọc khổ A4, nền trắng ngà (#F7F9FC). Font chữ dùng Arial cho toàn bộ infographic (tiêu đề lẫn nội dung). Tối ưu bố cục để tiết kiệm không gian, thuận mắt: padding vừa phải (không quá rộng gây trống trải), khoảng cách giữa các section gọn gàng, ưu tiên trình bày súc tích dạng danh sách/bảng ngắn thay vì đoạn văn dài, đảm bảo toàn bộ nội dung vừa gọn trong 1 trang A4. QUAN TRỌNG: tự động phân bổ diện tích của từng section theo ĐÚNG lượng nội dung thực tế — section nào có ít thông tin (VD không ai vắng/muộn, không ai thiếu bài) thì thu gọn lại, không để trống lãng phí; section nào có nhiều thông tin (VD nhiều học sinh, nhiều đầu điểm) thì được cấp đủ không gian để hiển thị rõ ràng, không bị dồn/ép chật. Không chia đều diện tích cố định giữa các section theo khung mẫu — kích thước mỗi khối linh hoạt theo nội dung.');
+  L.push('=== YÊU CẦU THIẾT KẾ ===');
+  L.push('Flat design hiện đại, dọc khổ A4, nền #F7F9FC, font Arial toàn bộ. Bố cục linh hoạt theo nội dung thật: mục ít thông tin (VD không ai vắng, không ai thiếu bài) thì thu gọn, không để trống lãng phí; mục nhiều thông tin thì đủ chỗ hiển thị, không ép chật — không chia đều diện tích cố định theo khung mẫu. Gói gọn trong 1 trang, padding vừa phải, bo góc 12-16px, bóng đổ mềm.');
   L.push('');
-  L.push('HEADER: Thanh ngang bo góc, nền gradient xanh dương (từ #3B5FE0 sang #2947C0), chữ tiêu đề "BÁO CÁO TỔNG KẾT BUỔI HỌC" in hoa, đậm, màu trắng, cỡ lớn. Dòng phụ bên dưới nhỏ hơn có icon quyển sách xanh + "Môn học: Tiếng Anh" và icon giáo viên + "Giáo viên phụ trách". Góc phải trên có badge bo tròn nền trắng chứa icon lịch + ngày tháng.');
+  L.push('HEADER: nền gradient xanh (#3B5FE0→#2947C0), tiêu đề "BÁO CÁO TỔNG KẾT BUỔI HỌC" hoa đậm trắng. Dòng phụ: icon sách + "Môn học: Tiếng Anh", icon GV + tên GV. Góc phải: badge tròn trắng icon lịch + ngày.');
+  L.push('SECTION 1 "NỘI DUNG BÀI HỌC": card trắng bo góc, icon sách mở, danh sách gạch đầu dòng, từ khóa in đậm.');
+  if(hasNote) L.push('SECTION "LƯU Ý BUỔI HỌC" (chỉ thêm mục này vì có nội dung): card trắng nhỏ gọn, icon 📌, danh sách gạch đầu dòng ngắn.');
+  L.push('SECTION "NỀN NẾP & Ý THỨC" / "BÀI TẬP VỀ NHÀ": 2 cột song song, chiều cao mỗi cột co giãn tự do theo nội dung (không cố định bằng nhau). Cột trái: icon mặt trời, chỉ liệt kê HS vắng/muộn dạng pill (đỏ nhạt "Vắng", cam "Muộn"); trống thì hiện "Cả lớp có mặt đầy đủ 🎉". Cột phải: icon cây bút, trình bày theo từng đầu mục loại bài thiếu (tên loại bài làm tiêu đề nhỏ đậm), tên HS thiếu bài đó xếp thành pill cam ngay dưới; trống thì hiện dòng khen tương tự.');
+  L.push('SECTION "KẾT QUẢ BÀI KIỂM TRA/LUYỆN TẬP": icon bia bắn. Mỗi đầu điểm 1 bảng gọn 2 cột "Họ và tên" | "Điểm", TẤT CẢ điểm cùng 1 màu xanh dương đậm #2947C0 (không phân cấp màu theo mức điểm); dưới bảng là 3 badge nhỏ "🏆 Cao nhất: [điểm] — [tên]", "📉 Thấp nhất: [điểm] — [tên]", "📊 TB lớp: [điểm]" (chữ điểm vẫn cùng màu xanh dương đậm). Nhiều đầu điểm thì xếp thành các khối liền nhau.');
+  L.push('FOOTER: chữ in nghiêng, canh giữa, xám nhạt: "Trân trọng cảm ơn Quý phụ huynh đã đồng hành cùng lớp học!"');
   L.push('');
-  L.push('SECTION 1: Thẻ bo góc nền trắng, viền mảnh, bóng đổ nhẹ. Tiêu đề có icon sách mở màu xanh + "1. NỘI DUNG BÀI HỌC" in hoa đậm màu xanh dương. Danh sách gạch đầu dòng, từ khóa in đậm đen, phần diễn giải chữ thường.');
-  L.push('');
-  L.push('SECTION 2 & 3: Hai thẻ trắng bo góc đặt song song 2 cột (chiều cao mỗi cột KHÔNG cố định bằng nhau — tự co giãn theo đúng lượng nội dung thực tế của mỗi bên, cột nào ít nội dung thì thấp/gọn hơn). Cột trái icon mặt trời + tiêu đề "2. NỀN NẾP & Ý THỨC" — chỉ liệt kê tên học sinh vắng/muộn kèm nhãn pill màu (đỏ nhạt "Vắng", cam "Muộn"); nếu không có ai thì hiện 1 dòng khen ngợi ngắn "Cả lớp có mặt đầy đủ 🎉". Cột phải icon cây bút + tiêu đề "3. BÀI TẬP VỀ NHÀ" — trình bày theo từng ĐẦU MỤC LOẠI BÀI còn thiếu (in đậm tên loại bài làm tiêu đề nhỏ), ngay bên dưới mỗi đầu mục là danh sách tên học sinh thiếu bài đó dạng pill cam nhỏ nằm cạnh nhau (không lặp lại tên loại bài theo từng học sinh — gộp theo đầu mục để tiết kiệm không gian); nếu không ai thiếu thì hiện dòng khen ngợi ngắn tương tự.');
-  L.push('');
-  L.push('SECTION 4: Thẻ trắng full-width, icon mục tiêu (bia bắn) + tiêu đề "4. KẾT QUẢ BÀI KIỂM TRA / LUYỆN TẬP". Với mỗi đầu điểm: 1 bảng gọn 2 cột "Họ và tên" | "Điểm" liệt kê đủ điểm từng học sinh, TẤT CẢ điểm số dùng CÙNG 1 MÀU duy nhất (xanh dương đậm #2947C0), không phân cấp màu theo mức điểm cao/thấp; ngay dưới bảng là 1 dòng tóm tắt nổi bật (dạng 3 badge nhỏ cạnh nhau) ghi "🏆 Cao nhất: [điểm] — [tên]", "📉 Thấp nhất: [điểm] — [tên]", "📊 TB lớp: [điểm]" (3 badge này vẫn có thể dùng icon khác nhau để phân biệt, nhưng chữ điểm số vẫn giữ cùng 1 màu xanh dương đậm như trên). Nếu buổi học có nhiều đầu điểm, mỗi đầu điểm trình bày thành 1 khối nhỏ liền nhau, gọn gàng, không tách trang.');
-  L.push('');
-  L.push('FOOTER: Dòng chữ in nghiêng, canh giữa, màu xám nhạt: "Trân trọng cảm ơn Quý phụ huynh đã đồng hành cùng lớp học!"');
-  L.push('');
-  L.push('Phong cách chung: UI card hiện đại, bo góc 12-16px, bóng đổ mềm (soft shadow), padding vừa đủ (không rộng thừa), font Arial đậm cho tiêu đề và font Arial thường cho nội dung, toàn bộ chữ là tiếng Việt có dấu, không lỗi chính tả.');
-  L.push('');
-  L.push('Hãy dùng ĐÚNG số liệu thực tế ở phần "DỮ LIỆU BUỔI HỌC" bên trên (tên học sinh, điểm số, trạng thái điểm danh, mức hoàn thành bài tập) để điền vào đúng các mục tương ứng trong thiết kế.');
+  L.push('Dùng đúng số liệu ở phần DỮ LIỆU (tên, điểm, điểm danh, mức hoàn thành bài) để điền vào đúng mục tương ứng, toàn bộ tiếng Việt có dấu, không lỗi chính tả.');
   return L.join('\n');
 }
 
