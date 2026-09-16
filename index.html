@@ -1772,15 +1772,15 @@ function buildSessionInfographicPrompt(classId, date){
   if(exercises.length){
     exercises.forEach(e=>{
       const scored = students.map(st=>({name:st.name, score:exerciseScoreOn10(e,(session.scores[st.id]||{})[e.id])})).filter(x=>x.score!==null);
+      const titleSuffix = exerciseMode(e)==='scale10' ? '(thang điểm 10)' : `(.../${exerciseTotal(e)} câu)`;
       L.push('');
-      L.push(`Điểm "${e.name}":`);
+      L.push(`Điểm "${e.name}" ${titleSuffix}:`);
       if(!scored.length){ L.push('Chưa có điểm.'); return; }
       L.push(scored.map(x=>`${x.name}: ${x.score.toFixed(1)}`).join(' · '));
       const max = Math.max(...scored.map(x=>x.score)), min = Math.min(...scored.map(x=>x.score));
       const avg = scored.reduce((a,b)=>a+b.score,0)/scored.length;
       const top = scored.filter(x=>x.score===max).map(x=>x.name).join(', ');
-      const low = scored.filter(x=>x.score===min).map(x=>x.name).join(', ');
-      L.push(`Tổng kết: Cao nhất ${max.toFixed(1)} (${top}) · Thấp nhất ${min.toFixed(1)} (${low}) · TB lớp ${avg.toFixed(1)}`);
+      L.push(`Tổng kết: Cao nhất ${max.toFixed(1)} — HS đạt: ${top} · Thấp nhất ${min.toFixed(1)} (không nêu tên) · TB lớp ${avg.toFixed(1)}`);
     });
   }
 
@@ -1792,7 +1792,7 @@ function buildSessionInfographicPrompt(classId, date){
   L.push('SECTION 1 "NỘI DUNG BÀI HỌC": card trắng bo góc, icon sách mở, danh sách gạch đầu dòng, từ khóa in đậm.');
   if(hasNote) L.push('SECTION "LƯU Ý BUỔI HỌC" (chỉ thêm mục này vì có nội dung): card trắng nhỏ gọn, icon 📌, danh sách gạch đầu dòng ngắn.');
   L.push('SECTION "NỀN NẾP & Ý THỨC" / "BÀI TẬP VỀ NHÀ": 2 cột song song, chiều cao mỗi cột co giãn tự do theo nội dung (không cố định bằng nhau). Cột trái: icon mặt trời, chỉ liệt kê HS vắng/muộn dạng pill (đỏ nhạt "Vắng", cam "Muộn"); trống thì hiện "Cả lớp có mặt đầy đủ 🎉". Cột phải: icon cây bút, trình bày theo từng đầu mục loại bài thiếu (tên loại bài làm tiêu đề nhỏ đậm), tên HS thiếu bài đó xếp thành pill cam ngay dưới; trống thì hiện dòng khen tương tự.');
-  L.push('SECTION "KẾT QUẢ BÀI KIỂM TRA/LUYỆN TẬP": icon bia bắn. Mỗi đầu điểm 1 bảng gọn 2 cột "Họ và tên" | "Điểm", TẤT CẢ điểm cùng 1 màu xanh dương đậm #2947C0 (không phân cấp màu theo mức điểm); dưới bảng là 3 badge nhỏ "🏆 Cao nhất: [điểm] — [tên]", "📉 Thấp nhất: [điểm] — [tên]", "📊 TB lớp: [điểm]" (chữ điểm vẫn cùng màu xanh dương đậm). Nhiều đầu điểm thì xếp thành các khối liền nhau.');
+  L.push('SECTION "KẾT QUẢ BÀI KIỂM TRA/LUYỆN TẬP": icon bia bắn. Mỗi đầu điểm 1 bảng gọn 2 cột "Họ và tên" | "Điểm", TẤT CẢ điểm cùng 1 màu xanh dương đậm #2947C0 (không phân cấp màu theo mức điểm); dưới bảng có 3 badge nhỏ: "🏆 Cao nhất: [điểm] — [tên học sinh đạt điểm đó]" (BẮT BUỘC ghi tên, lấy đúng tên trong phần DỮ LIỆU), "📉 Thấp nhất: [điểm]" (CHỈ ghi điểm số, TUYỆT ĐỐI KHÔNG ghi tên học sinh nào ở badge này), "📊 TB lớp: [điểm]" (chữ điểm vẫn cùng màu xanh dương đậm). Nhiều đầu điểm thì xếp thành các khối liền nhau.');
   L.push('FOOTER: chữ in nghiêng, canh giữa, xám nhạt: "Trân trọng cảm ơn Quý phụ huynh đã đồng hành cùng lớp học!"');
   L.push('');
   L.push('Dùng đúng số liệu ở phần DỮ LIỆU (tên, điểm, điểm danh, mức hoàn thành bài) để điền vào đúng mục tương ứng, toàn bộ tiếng Việt có dấu, không lỗi chính tả.');
