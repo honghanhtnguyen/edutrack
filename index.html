@@ -456,7 +456,7 @@ const state = {
   tab: 'home',
   currentClassId: null,
   session: { activeId: null, date: todayISO(), prompt:'', sortKey:'default', sortDir:'desc' },
-  report: { classId:null, studentId:null, mode:'student' },
+  report: { classId:null, studentId:null, mode:'student', infographicDate:null, infographicPrompt:'' },
   progress: { classId:null, studentId:null, query:'' },
   attendance: { classId:null, month:'all' },
   contacts: { classId:null, studentId:null },
@@ -1735,6 +1735,91 @@ function generateClassRemark(classId){
 function trendArrow(d){ if(d===null||d===undefined) return ''; if(d>0) return '▲ '; if(d<0) return '▼ '; return '● '; }
 function trendColor(d){ return d===null||d===undefined ? 'var(--ink-soft)' : (d>0 ? 'var(--success)' : (d<0 ? 'var(--danger)' : 'var(--ink-soft)')); }
 
+function buildSessionInfographicPrompt(classId, date){
+  const cls = getClass(classId);
+  const session = (state.sessionsByClass[classId]||[]).find(s=>s.date===date);
+  if(!cls || !session) return '';
+  const students = cls.students;
+  const types = session.exerciseTypes || [];
+  const exercises = session.exercises || [];
+
+  const L = [];
+  L.push('Bạn là trợ lý giúp giáo viên tạo INFOGRAPHIC BÁO CÁO TỔNG KẾT BUỔI HỌC để gửi phụ huynh, dựa trên đúng dữ liệu thực tế bên dưới — không bịa thêm số liệu.');
+  L.push('');
+  L.push('=== DỮ LIỆU BUỔI HỌC ===');
+  L.push(`Lớp: ${cls.name}`);
+  L.push(`Ngày học: ${fmtDateVN(date)}`);
+  L.push(`Giáo viên: ${state.teacherName || '(chưa nhập tên)'}`);
+  L.push(`Nội dung bài học: ${session.content || '(chưa nhập)'}`);
+  L.push(`Bài tập về nhà giao: ${session.homework || '(chưa nhập)'}`);
+  L.push('');
+
+  // Điểm danh: chỉ liệt kê học sinh vắng/muộn, không liệt kê người có mặt
+  const absentees = students.map(st=>({name:st.name, status:session.attendance[st.id]})).filter(x=>x.status==='absent'||x.status==='late');
+  L.push('Điểm danh (chỉ liệt kê học sinh vắng/muộn, còn lại coi như có mặt đầy đủ):');
+  if(absentees.length){
+    absentees.forEach(x=> L.push(`- ${x.name}: ${x.status==='absent'?'Vắng':'Muộn'}`));
+  } else {
+    L.push('Không có học sinh nào vắng hoặc đi muộn — cả lớp có mặt đầy đủ.');
+  }
+
+  // BTVN: gộp theo TỪNG LOẠI BÀI còn thiếu (đầu mục), bên dưới liệt kê tên học sinh thiếu bài đó — tránh lặp lại tên loại bài nhiều lần, tối ưu không gian
+  if(types.length){
+    L.push('');
+    L.push('Bài tập về nhà (gộp theo từng loại bài còn thiếu, bên dưới là tên học sinh thiếu bài đó):');
+    let anyMissing = false;
+    types.forEach(t=>{
+      const missingNames = students.filter(st=>{
+        const rec = session.checklist[st.id] || {};
+        return (rec[t.id]||'none') !== 'full';
+      }).map(st=>st.name);
+      if(missingNames.length){
+        anyMissing = true;
+        L.push(`${t.name}: ${missingNames.join(', ')}`);
+      }
+    });
+    if(!anyMissing){
+      L.push('Không có học sinh nào thiếu bài — cả lớp hoàn thành đầy đủ.');
+    }
+  }
+
+  // Điểm: liệt kê điểm từng em (gọn, trực quan) + kèm dòng tổng kết Cao nhất/Thấp nhất/TB lớp cho mỗi đầu điểm
+  if(exercises.length){
+    exercises.forEach(e=>{
+      L.push('');
+      L.push(`Kết quả bài "${e.name}" (điểm từng học sinh):`);
+      const scored = students.map(st=>({name:st.name, score:exerciseScoreOn10(e,(session.scores[st.id]||{})[e.id])})).filter(x=>x.score!==null);
+      if(!scored.length){ L.push('Chưa có điểm.'); return; }
+      scored.forEach(x=> L.push(`- ${x.name}: ${x.score.toFixed(1)} điểm`));
+      const max = Math.max(...scored.map(x=>x.score));
+      const min = Math.min(...scored.map(x=>x.score));
+      const avg = scored.reduce((a,b)=>a+b.score,0)/scored.length;
+      const topNames = scored.filter(x=>x.score===max).map(x=>x.name).join(', ');
+      const lowNames = scored.filter(x=>x.score===min).map(x=>x.name).join(', ');
+      L.push(`Tổng kết: Cao nhất ${max.toFixed(1)} điểm (${topNames}) · Thấp nhất ${min.toFixed(1)} điểm (${lowNames}) · Trung bình lớp ${avg.toFixed(1)} điểm`);
+    });
+  }
+
+  L.push('');
+  L.push('=== YÊU CẦU THIẾT KẾ INFOGRAPHIC ===');
+  L.push('Tạo một infographic báo cáo tổng kết buổi học, phong cách flat design hiện đại, bố cục dọc khổ A4, nền trắng ngà (#F7F9FC). Font chữ dùng Arial cho toàn bộ infographic (tiêu đề lẫn nội dung). Tối ưu bố cục để tiết kiệm không gian, thuận mắt: padding vừa phải (không quá rộng gây trống trải), khoảng cách giữa các section gọn gàng, ưu tiên trình bày súc tích dạng danh sách/bảng ngắn thay vì đoạn văn dài, đảm bảo toàn bộ nội dung vừa gọn trong 1 trang A4.');
+  L.push('');
+  L.push('HEADER: Thanh ngang bo góc, nền gradient xanh dương (từ #3B5FE0 sang #2947C0), chữ tiêu đề "BÁO CÁO TỔNG KẾT BUỔI HỌC" in hoa, đậm, màu trắng, cỡ lớn. Dòng phụ bên dưới nhỏ hơn có icon quyển sách xanh + "Môn học: Tiếng Anh" và icon giáo viên + "Giáo viên phụ trách". Góc phải trên có badge bo tròn nền trắng chứa icon lịch + ngày tháng.');
+  L.push('');
+  L.push('SECTION 1: Thẻ bo góc nền trắng, viền mảnh, bóng đổ nhẹ. Tiêu đề có icon sách mở màu xanh + "1. NỘI DUNG BÀI HỌC" in hoa đậm màu xanh dương. Danh sách gạch đầu dòng, từ khóa in đậm đen, phần diễn giải chữ thường.');
+  L.push('');
+  L.push('SECTION 2 & 3: Hai thẻ trắng bo góc đặt song song 2 cột, gọn gàng, không để trống nhiều nếu danh sách ngắn. Cột trái icon mặt trời + tiêu đề "2. NỀN NẾP & Ý THỨC" — chỉ liệt kê tên học sinh vắng/muộn kèm nhãn pill màu (đỏ nhạt "Vắng", cam "Muộn"); nếu không có ai thì hiện 1 dòng khen ngợi ngắn "Cả lớp có mặt đầy đủ 🎉". Cột phải icon cây bút + tiêu đề "3. BÀI TẬP VỀ NHÀ" — trình bày theo từng ĐẦU MỤC LOẠI BÀI còn thiếu (in đậm tên loại bài làm tiêu đề nhỏ), ngay bên dưới mỗi đầu mục là danh sách tên học sinh thiếu bài đó dạng pill cam nhỏ nằm cạnh nhau (không lặp lại tên loại bài theo từng học sinh — gộp theo đầu mục để tiết kiệm không gian); nếu không ai thiếu thì hiện dòng khen ngợi ngắn tương tự.');
+  L.push('');
+  L.push('SECTION 4: Thẻ trắng full-width, icon mục tiêu (bia bắn) + tiêu đề "4. KẾT QUẢ BÀI KIỂM TRA / LUYỆN TẬP". Với mỗi đầu điểm: 1 bảng gọn 2 cột "Họ và tên" | "Điểm" liệt kê đủ điểm từng học sinh, điểm số tô màu theo mức (xanh lá đậm = điểm cao, xanh dương = điểm khá, cam = điểm thấp); ngay dưới bảng là 1 dòng tóm tắt nổi bật (dạng 3 badge nhỏ cạnh nhau) ghi "🏆 Cao nhất: [điểm] — [tên]", "📉 Thấp nhất: [điểm] — [tên]", "📊 TB lớp: [điểm]". Nếu buổi học có nhiều đầu điểm, mỗi đầu điểm trình bày thành 1 khối nhỏ liền nhau, gọn gàng, không tách trang.');
+  L.push('');
+  L.push('FOOTER: Dòng chữ in nghiêng, canh giữa, màu xám nhạt: "Trân trọng cảm ơn Quý phụ huynh đã đồng hành cùng lớp học!"');
+  L.push('');
+  L.push('Phong cách chung: UI card hiện đại, bo góc 12-16px, bóng đổ mềm (soft shadow), padding vừa đủ (không rộng thừa), font Arial đậm cho tiêu đề và font Arial thường cho nội dung, toàn bộ chữ là tiếng Việt có dấu, không lỗi chính tả.');
+  L.push('');
+  L.push('Hãy dùng ĐÚNG số liệu thực tế ở phần "DỮ LIỆU BUỔI HỌC" bên trên (tên học sinh, điểm số, trạng thái điểm danh, mức hoàn thành bài tập) để điền vào đúng các mục tương ứng trong thiết kế.');
+  return L.join('\n');
+}
+
 function renderClassReportBody(classId){
   const cls = getClass(classId);
   const students = cls.students;
@@ -1881,6 +1966,10 @@ function renderReport(){
   const cls = getClass(classId);
 
   if(mode==='class'){
+    const sessionsForInfo = getSessions(classId);
+    const infoDate = (state.report.infographicDate && sessionsForInfo.some(s=>s.date===state.report.infographicDate))
+      ? state.report.infographicDate
+      : (sessionsForInfo.length ? sessionsForInfo[sessionsForInfo.length-1].date : null);
     return `
       <div class="topbar no-print">
         <div><h1 class="page-title">Báo cáo học tập</h1>${chalkUnderline()}<div class="page-sub">Tổng hợp tình hình học tập chung của cả lớp</div></div>
@@ -1895,6 +1984,30 @@ function renderReport(){
       <div class="card" id="report-print-area">
         ${cls.students.length ? renderClassReportBody(classId) : `<div class="empty"><h3>Lớp chưa có học sinh</h3></div>`}
       </div>
+
+      ${sessionsForInfo.length ? `
+      <div class="card no-print">
+        <div class="card-title">🎨 Infographic tổng kết buổi học</div>
+        <div class="muted" style="margin-bottom:10px;">Chọn 1 buổi học đã ghi nhận, tạo prompt kèm đúng dữ liệu buổi đó — dán vào ChatGPT (bản tạo ảnh) để ra ngay ảnh infographic gửi phụ huynh.</div>
+        <div style="display:flex; gap:8px; align-items:flex-end; flex-wrap:wrap;">
+          <div style="flex:1; min-width:200px;">
+            <label class="field-label">Buổi học</label>
+            <select data-action="report-change-infographic-date">
+              ${sessionsForInfo.slice().reverse().map(s=>`<option value="${s.date}" ${infoDate===s.date?'selected':''}>${fmtDateVN(s.date)}</option>`).join('')}
+            </select>
+          </div>
+          <button class="btn btn-accent" data-action="generate-session-infographic-prompt" data-class="${classId}" data-date="${infoDate}">✨ Tạo prompt infographic</button>
+        </div>
+      </div>
+      ${state.report.infographicPrompt ? `
+      <div class="card no-print">
+        <div class="card-title">
+          <span>📝 Prompt infographic</span>
+          <button class="btn btn-outline btn-sm" data-action="copy-session-infographic-prompt">💬 Copy prompt</button>
+        </div>
+        <textarea id="session-infographic-prompt-text" rows="16">${esc(state.report.infographicPrompt)}</textarea>
+      </div>` : ''}
+      ` : ''}
     `;
   }
 
@@ -4973,6 +5086,21 @@ async function handleAction(action, elx, e){
 
     /* ---- Report ---- */
     case 'report-change-class': state.report.classId = elx.value; state.report.studentId=null; render(); break;
+    case 'report-change-infographic-date': state.report.infographicDate = elx.value; render(); break;
+    case 'generate-session-infographic-prompt': {
+      const text = buildSessionInfographicPrompt(elx.dataset.class, elx.dataset.date);
+      if(text){ state.report.infographicPrompt = text; render(); }
+      else { showToast('Không tạo được prompt — chưa có dữ liệu buổi học này.'); }
+      break;
+    }
+    case 'copy-session-infographic-prompt': {
+      const el = document.getElementById('session-infographic-prompt-text');
+      const text = el ? el.value : state.report.infographicPrompt;
+      copyTextToClipboard(text).then(ok=>{
+        showToast(ok ? 'Đã copy — dán vào ChatGPT để tạo infographic.' : 'Không copy được, cô bôi đen (Ctrl+A) rồi Ctrl+C nhé.', 3200);
+      });
+      break;
+    }
     case 'report-change-student': state.report.studentId = elx.value; render(); break;
     case 'report-set-mode': state.report.mode = elx.dataset.mode; render(); break;
     case 'goto-report':
