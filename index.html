@@ -1524,7 +1524,11 @@ function renderSession(){
                   <button class="${a==='late'?'on late':''}" title="Muộn" data-action="set-att" data-student="${st.id}" data-value="late">⏰</button>
                 </div>
               </td>
+              ${(()=>{ const isAbsent = a==='absent'; return `
               ${types.map(t=>{
+                if(isAbsent){
+                  return `<td style="text-align:center;"><div class="tick" title="Học sinh vắng mặt — không cần nhập" style="background:var(--surface-alt);color:var(--ink-faint);cursor:not-allowed;">—</div></td>`;
+                }
                 const v = (sess.checklist[st.id]||{})[t.id] || 'none';
                 const label = v==='full'?'✓':(v==='partial'?'½':'—');
                 return `<td style="text-align:center;"><div class="tick ${v}" data-action="cycle-check" data-student="${st.id}" data-type="${t.id}">${label}</div></td>`;
@@ -1533,6 +1537,9 @@ function renderSession(){
                 const mode = exerciseMode(e);
                 const total = exerciseTotal(e);
                 const v = (sess.scores[st.id]||{})[e.id];
+                if(isAbsent){
+                  return `<td style="text-align:center;"><input class="score-input" type="number" value="" placeholder="Vắng" disabled title="Học sinh vắng mặt — không cần nhập" style="background:var(--surface-alt);color:var(--ink-faint);cursor:not-allowed;"></td>`;
+                }
                 if(mode==='scale10'){
                   return `<td style="text-align:center;">
                     <input class="score-input" type="number" min="0" max="10" step="0.1" value="${v!==undefined?v:''}" placeholder="0-10" data-action="set-score" data-student="${st.id}" data-exercise="${e.id}" data-total="${total}" data-mode="scale10">
@@ -1546,6 +1553,7 @@ function renderSession(){
                   </div>
                 </td>`;
               }).join('')}
+              `; })()}
               <td>
                 <div style="display:flex; flex-direction:column; gap:4px; font-size:12.5px;">
                   ${owes? `<label style="display:flex;align-items:center;gap:4px;cursor:pointer;color:var(--danger);"><input type="checkbox" ${done?'checked':''} data-action="toggle-punishment-done" data-student="${st.id}"> Đã KT</label>` : ''}
@@ -1760,11 +1768,11 @@ function buildSessionInfographicPrompt(classId, date){
 
   if(types.length){
     L.push('');
-    L.push('BTVN còn thiếu (gộp theo đầu mục, tên HS liệt kê dưới mỗi mục — học sinh vắng mặt mặc định tính là thiếu mọi loại bài):');
+    L.push('BTVN còn thiếu (gộp theo đầu mục, tên HS liệt kê dưới mỗi mục — KHÔNG tính học sinh vắng mặt vào đây, vì vắng đã thể hiện ở mục điểm danh rồi):');
     let any = false;
     types.forEach(t=>{
       const names = students.filter(st=>{
-        if(session.attendance[st.id]==='absent') return true;
+        if(session.attendance[st.id]==='absent') return false;
         return ((session.checklist[st.id]||{})[t.id]||'none')!=='full';
       }).map(st=>st.name);
       if(names.length){ any=true; L.push(`${t.name}: ${names.join(', ')}`); }
@@ -4959,11 +4967,12 @@ async function handleAction(action, elx, e){
       const sess = ensureSessionEditable();
       const typeId = elx.dataset.type;
       getStudents(state.currentClassId).forEach(st=>{
+        if(sess.attendance[st.id]==='absent') return; // học sinh vắng — bỏ qua, không tick
         if(!sess.checklist[st.id]) sess.checklist[st.id] = {};
         sess.checklist[st.id][typeId] = 'full';
       });
       render(); saveSessions(state.currentClassId);
-      showToast('Đã tick cả lớp là Đầy đủ.');
+      showToast('Đã tick cả lớp là Đầy đủ (trừ học sinh vắng).');
       break;
     }
     case 'add-extype': {
