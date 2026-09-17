@@ -1760,10 +1760,13 @@ function buildSessionInfographicPrompt(classId, date){
 
   if(types.length){
     L.push('');
-    L.push('BTVN còn thiếu (gộp theo đầu mục, tên HS liệt kê dưới mỗi mục):');
+    L.push('BTVN còn thiếu (gộp theo đầu mục, tên HS liệt kê dưới mỗi mục — học sinh vắng mặt mặc định tính là thiếu mọi loại bài):');
     let any = false;
     types.forEach(t=>{
-      const names = students.filter(st=>((session.checklist[st.id]||{})[t.id]||'none')!=='full').map(st=>st.name);
+      const names = students.filter(st=>{
+        if(session.attendance[st.id]==='absent') return true;
+        return ((session.checklist[st.id]||{})[t.id]||'none')!=='full';
+      }).map(st=>st.name);
       if(names.length){ any=true; L.push(`${t.name}: ${names.join(', ')}`); }
     });
     if(!any) L.push('Cả lớp hoàn thành đầy đủ.');
