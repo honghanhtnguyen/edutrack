@@ -1792,34 +1792,35 @@ function buildSessionInfographicPrompt(classId, date){
       L.push(`Điểm "${e.name}" ${titleSuffix}:`);
       if(!scored.length){ L.push('Chưa có điểm.'); return; }
 
-      // Chỉ chọn hiển thị: điểm > 8, HOẶC nằm trong Top 5 cao nhất lớp (tính cả học sinh đồng điểm ở mốc thứ 5), HOẶC có ghi chú riêng
+      // Nhóm 1: học sinh điểm cao (điểm >8, hoặc Top 5 cao nhất lớp — tính cả đồng điểm ở mốc thứ 5)
       const sortedDesc = scored.slice().sort((a,b)=>b.score-a.score);
       const top5CutoffScore = sortedDesc.length ? sortedDesc[Math.min(4, sortedDesc.length-1)].score : null;
-      const shown = scored.filter(x=> x.score>8 || (top5CutoffScore!==null && x.score>=top5CutoffScore) || x.note);
+      const topScorers = scored.filter(x=> x.score>8 || (top5CutoffScore!==null && x.score>=top5CutoffScore));
+      // Nhóm 2: học sinh có ghi chú riêng (liệt kê RIÊNG, bên dưới nhóm điểm cao — kể cả khi đã có trong nhóm 1)
+      const noted = scored.filter(x=> x.note);
 
-      L.push('CHỈ hiển thị tên + điểm của các học sinh sau (điểm >8, hoặc Top 5 cao nhất lớp, hoặc có ghi chú riêng) — các học sinh còn lại KHÔNG được liệt kê tên/điểm trong bảng, chỉ tính vào số liệu tổng kết:');
-      if(shown.length){
-        L.push(shown.map(x=> x.note ? `${x.name}: ${x.score.toFixed(1)} — Ghi chú: ${x.note}` : `${x.name}: ${x.score.toFixed(1)}`).join(' · '));
-      } else {
-        L.push('(Không có học sinh nào đạt tiêu chí hiển thị cho bài này.)');
-      }
+      L.push('NHÓM 1 — Học sinh điểm cao (điểm >8 hoặc Top 5 cao nhất lớp) — chỉ liệt kê đúng những em này kèm điểm, các em khác không hiện tên/điểm:');
+      L.push(topScorers.length ? topScorers.map(x=>`${x.name}: ${x.score.toFixed(1)}`).join(' · ') : '(Không có học sinh nào đạt mốc điểm cao cho bài này.)');
+
+      L.push('NHÓM 2 — Học sinh có ghi chú riêng (liệt kê RIÊNG BIỆT, hiển thị NGAY BÊN DƯỚI nhóm điểm cao ở trên, không gộp chung 1 bảng với Nhóm 1):');
+      L.push(noted.length ? noted.map(x=>`${x.name} — Ghi chú: ${x.note}`).join(' · ') : '(Không có học sinh nào có ghi chú riêng cho buổi này.)');
 
       const max = Math.max(...scored.map(x=>x.score)), min = Math.min(...scored.map(x=>x.score));
       const avg = scored.reduce((a,b)=>a+b.score,0)/scored.length;
       const top = scored.filter(x=>x.score===max).map(x=>x.name).join(', ');
-      L.push(`Tổng kết (tính trên cả lớp, dùng để hiện số liệu chung, KHÔNG liệt kê thêm tên nào khác ngoài danh sách trên): Cao nhất ${max.toFixed(1)} — HS đạt: ${top} · Thấp nhất ${min.toFixed(1)} (không nêu tên) · TB lớp ${avg.toFixed(1)}`);
+      L.push(`Tổng kết (tính trên cả lớp, dùng để hiện số liệu chung, KHÔNG liệt kê thêm tên nào khác ngoài 2 nhóm trên): Cao nhất ${max.toFixed(1)} — HS đạt: ${top} · Thấp nhất ${min.toFixed(1)} (không nêu tên) · TB lớp ${avg.toFixed(1)}`);
     });
   }
 
   L.push('');
   L.push('=== YÊU CẦU THIẾT KẾ ===');
-  L.push('Flat design hiện đại, dọc khổ A4, nền #F7F9FC, font Arial toàn bộ. Bố cục linh hoạt theo nội dung thật: mục ít thông tin (VD không ai vắng, không ai thiếu bài) thì thu gọn, không để trống lãng phí; mục nhiều thông tin thì đủ chỗ hiển thị, không ép chật — không chia đều diện tích cố định theo khung mẫu. Gói gọn trong 1 trang, padding vừa phải, bo góc 12-16px, bóng đổ mềm.');
+  L.push('Flat design hiện đại, dọc khổ A4, font Arial toàn bộ. Tông màu chủ đạo: XANH DƯƠNG, có hiệu ứng GRADIENT xuyên suốt toàn ảnh (không dùng màu xanh phẳng đơn sắc) — nền tổng thể là gradient xanh nhạt (từ #EAF1FF phía trên chuyển dần xuống #F7F9FC phía dưới); mỗi card/section cũng có điểm nhấn gradient xanh (VD dải màu mỏng phía trên card, khung icon nền gradient #3B5FE0→#2947C0, hoặc viền gradient nhẹ) thay vì icon/viền màu xanh phẳng 1 tông. Bố cục linh hoạt theo nội dung thật: mục ít thông tin (VD không ai vắng, không ai thiếu bài) thì thu gọn, không để trống lãng phí; mục nhiều thông tin thì đủ chỗ hiển thị, không ép chật — không chia đều diện tích cố định theo khung mẫu. Gói gọn trong 1 trang, padding vừa phải, bo góc 12-16px, bóng đổ mềm.');
   L.push('');
-  L.push('HEADER: nền gradient xanh (#3B5FE0→#2947C0), tiêu đề "BÁO CÁO TỔNG KẾT BUỔI HỌC" hoa đậm trắng. Dòng phụ: icon sách + "Môn học: Tiếng Anh", icon GV + tên GV. Góc phải: badge tròn trắng icon lịch + ngày.');
-  L.push('SECTION 1 "NỘI DUNG BÀI HỌC": card trắng bo góc, icon sách mở, danh sách gạch đầu dòng, từ khóa in đậm.');
-  if(hasNote) L.push('SECTION "LƯU Ý BUỔI HỌC" (chỉ thêm mục này vì có nội dung): card trắng nhỏ gọn, icon 📌, danh sách gạch đầu dòng ngắn.');
-  L.push('SECTION "NỀN NẾP & Ý THỨC" / "BÀI TẬP VỀ NHÀ": 2 cột song song, chiều cao mỗi cột co giãn tự do theo nội dung (không cố định bằng nhau). Cột trái: icon mặt trời, chỉ liệt kê HS vắng/muộn dạng pill (đỏ nhạt "Vắng", cam "Muộn"); trống thì hiện "Cả lớp có mặt đầy đủ 🎉". Cột phải: icon cây bút, trình bày theo từng đầu mục loại bài thiếu (tên loại bài làm tiêu đề nhỏ đậm), tên HS thiếu bài đó xếp thành pill cam ngay dưới; trống thì hiện dòng khen tương tự.');
-  L.push('SECTION "KẾT QUẢ BÀI KIỂM TRA/LUYỆN TẬP": icon bia bắn. QUAN TRỌNG — vì lý do bảo mật điểm số của trung tâm, bảng KHÔNG được liệt kê điểm của toàn bộ học sinh, CHỈ hiển thị đúng những học sinh đã cho trong danh sách "CHỈ hiển thị..." ở phần DỮ LIỆU. Mỗi đầu điểm 1 bảng gọn 3 cột "Họ và tên" | "Điểm" | "Ghi chú" (cột Ghi chú để trống nếu học sinh không có ghi chú, chỉ điền nếu dữ liệu có kèm "Ghi chú: ..."), TẤT CẢ điểm cùng 1 màu xanh dương đậm #2947C0 (không phân cấp màu theo mức điểm). Nếu danh sách hiển thị rỗng thì bỏ qua bảng, chỉ hiện phần tổng kết bên dưới. Dưới bảng có 3 badge nhỏ: "🏆 Cao nhất: [điểm] — [tên học sinh đạt điểm đó]" (BẮT BUỘC ghi tên, lấy đúng tên trong phần DỮ LIỆU), "📉 Thấp nhất: [điểm]" (CHỈ ghi điểm số, TUYỆT ĐỐI KHÔNG ghi tên học sinh nào ở badge này), "📊 TB lớp: [điểm]" (chữ điểm vẫn cùng màu xanh dương đậm). TUYỆT ĐỐI KHÔNG tự thêm tên/điểm của học sinh nào ngoài danh sách đã cho, kể cả khi biết điểm của họ qua phần tổng kết. Nhiều đầu điểm thì xếp thành các khối liền nhau.');
+  L.push('HEADER: nền gradient xanh dương đậm (#3B5FE0→#2947C0), tiêu đề "BÁO CÁO TỔNG KẾT BUỔI HỌC" hoa đậm trắng. Dòng phụ: icon sách + "Môn học: Tiếng Anh", icon GV + tên GV. Góc phải: badge tròn trắng icon lịch + ngày.');
+  L.push('SECTION 1 "NỘI DUNG BÀI HỌC": card trắng bo góc, dải/icon nhấn gradient xanh, danh sách gạch đầu dòng, từ khóa in đậm.');
+  if(hasNote) L.push('SECTION "LƯU Ý BUỔI HỌC" (chỉ thêm mục này vì có nội dung): card trắng nhỏ gọn, icon 📌 nền gradient xanh, danh sách gạch đầu dòng ngắn.');
+  L.push('SECTION "NỀN NẾP & Ý THỨC" / "BÀI TẬP VỀ NHÀ": 2 cột song song, chiều cao mỗi cột co giãn tự do theo nội dung (không cố định bằng nhau). Cột trái: icon mặt trời nền gradient xanh, chỉ liệt kê HS vắng/muộn dạng pill (đỏ nhạt "Vắng", cam "Muộn"); trống thì hiện "Cả lớp có mặt đầy đủ 🎉". Cột phải: icon cây bút nền gradient xanh, trình bày theo từng đầu mục loại bài thiếu (tên loại bài làm tiêu đề nhỏ đậm), tên HS thiếu bài đó xếp thành pill cam ngay dưới; trống thì hiện dòng khen tương tự.');
+  L.push('SECTION "KẾT QUẢ BÀI KIỂM TRA/LUYỆN TẬP": icon bia bắn. QUAN TRỌNG — vì lý do bảo mật điểm số của trung tâm, KHÔNG được liệt kê điểm của toàn bộ học sinh. Với mỗi đầu điểm, trình bày thành 2 khối RIÊNG BIỆT theo đúng thứ tự: (1) TRƯỚC TIÊN — 1 bảng gọn 2 cột "Họ và tên" | "Điểm" chỉ gồm đúng các học sinh trong "NHÓM 1" ở phần DỮ LIỆU, TẤT CẢ điểm cùng 1 màu xanh dương đậm #2947C0 (không phân cấp màu theo mức điểm); nếu Nhóm 1 rỗng thì bỏ qua bảng này. (2) NGAY BÊN DƯỚI bảng điểm — 1 khối nhỏ riêng (có thể dạng danh sách gạch đầu dòng, nền nhạt khác màu để phân biệt rõ với bảng điểm phía trên) tiêu đề nhỏ "Ghi chú của giáo viên", liệt kê đúng các học sinh trong "NHÓM 2" kèm nội dung ghi chú; nếu Nhóm 2 rỗng thì bỏ qua khối này. Dưới cùng có 3 badge nhỏ nền gradient xanh nhạt (VD #EAF1FF→#DCE8FF) để đồng bộ tông màu: "🏆 Cao nhất: [điểm] — [tên học sinh đạt điểm đó]" (BẮT BUỘC ghi tên, lấy đúng tên trong phần DỮ LIỆU), "📉 Thấp nhất: [điểm]" (CHỈ ghi điểm số, TUYỆT ĐỐI KHÔNG ghi tên học sinh nào ở badge này), "📊 TB lớp: [điểm]" (chữ điểm giữ màu xanh dương đậm #2947C0 phẳng để dễ đọc, chỉ nền badge là gradient). TUYỆT ĐỐI KHÔNG tự thêm tên/điểm của học sinh nào ngoài 2 nhóm đã cho, kể cả khi biết điểm của họ qua phần tổng kết. Nhiều đầu điểm thì xếp thành các khối liền nhau.');
   L.push('FOOTER: chữ in nghiêng, canh giữa, xám nhạt: "Trân trọng cảm ơn Quý phụ huynh đã đồng hành cùng lớp học!"');
   L.push('');
   L.push('Dùng đúng số liệu ở phần DỮ LIỆU (tên, điểm, điểm danh, mức hoàn thành bài) để điền vào đúng mục tương ứng, toàn bộ tiếng Việt có dấu, không lỗi chính tả.');
