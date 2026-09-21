@@ -2235,6 +2235,11 @@ function renderAttendanceExport(){
     return { month:m, sessionCount: sess.length, avgRate };
   });
 
+  const attIcon = (a) => a==='present' ? '<span style="color:var(--success);font-weight:700;">✓</span>'
+    : a==='absent' ? '<span style="color:var(--danger);font-weight:700;">✗</span>'
+    : a==='late' ? '<span style="color:var(--late);font-weight:700;">⏰</span>'
+    : '<span class="tiny" style="color:var(--ink-faint);">—</span>';
+
   return `
     <div class="topbar">
       <div><h1 class="page-title">Chuyên cần</h1>${chalkUnderline()}<div class="page-sub">Đếm buổi học và xuất báo cáo chuyên cần theo lớp, theo tháng</div></div>
@@ -2261,18 +2266,37 @@ function renderAttendanceExport(){
     </div>` : ''}
 
     <div class="card">
-      <div class="card-title">Chi tiết theo học sinh ${selectedMonth!=='all'? '— '+monthLabel(selectedMonth) : '— Tất cả các tháng'}</div>
-      <table><thead><tr><th>Học sinh</th><th>Số buổi có dữ liệu</th><th>Có mặt</th><th>Vắng</th><th>Muộn</th><th>Tỷ lệ chuyên cần</th></tr></thead><tbody>
+      <div class="card-title">Sổ điểm danh ${selectedMonth!=='all'? '— '+monthLabel(selectedMonth) : '— Tất cả các tháng'}</div>
+      ${sessions.length ? `
+      <div class="muted" style="margin-bottom:10px;">✓ Có mặt · ✗ Vắng · ⏰ Muộn · — Chưa điểm danh. Cuộn ngang nếu bảng rộng hơn màn hình.</div>
+      <div style="overflow-x:auto;">
+      <table class="session-table" style="min-width:${300 + sessions.length*64}px;">
+        <thead><tr>
+          <th style="min-width:130px;">Học sinh</th>
+          ${sessions.map(s=>`<th style="text-align:center;min-width:60px;">${fmtDateVN(s.date)}</th>`).join('')}
+        </tr></thead>
+        <tbody>
+        ${cls.students.map(st=>`
+          <tr class="ledger">
+            <td><b>${esc(st.name)}</b></td>
+            ${sessions.map(s=> `<td style="text-align:center;">${attIcon(s.attendance[st.id])}</td>`).join('')}
+          </tr>`).join('')}
+        </tbody>
+      </table>
+      </div>
+
+      <div class="card-title" style="margin-top:22px;">Tổng số</div>
+      <table><thead><tr><th>Học sinh</th><th style="text-align:center;">Số buổi có dữ liệu</th><th style="text-align:center;">Có mặt</th><th style="text-align:center;">Vắng</th><th style="text-align:center;">Muộn</th></tr></thead><tbody>
       ${rows.map(r=>`
-        <tr class="ledger ${r.rate!==null && r.rate<75?'flagged':''}">
+        <tr class="ledger ${r.absent>=3?'flagged':''}">
           <td>${esc(r.name)}</td>
-          <td class="mono">${r.total}</td>
-          <td class="mono">${r.present}</td>
-          <td class="mono">${r.absent}</td>
-          <td class="mono">${r.late}</td>
-          <td class="mono">${r.rate!==null?r.rate+'%':'—'}</td>
+          <td class="mono" style="text-align:center;">${r.total}</td>
+          <td class="mono" style="text-align:center;">${r.present}</td>
+          <td class="mono" style="text-align:center;">${r.absent}</td>
+          <td class="mono" style="text-align:center;">${r.late}</td>
         </tr>`).join('')}
       </tbody></table>
+      ` : `<div class="muted">Chưa có buổi học nào trong khoảng đang xem.</div>`}
     </div>
   `;
 }
