@@ -2721,19 +2721,25 @@ function renderConductSection(classId, cls){
 }
 
 function exportConductExcel(classId, month){
-  const cls = getClass(classId);
-  const rows = [['Học sinh','Chuyên cần (%)','Hoàn thành BT (%)','Số vi phạm','Xếp loại hạnh kiểm','Nhận xét']];
-  cls.students.forEach(s=>{
-    const sug = conductSuggestion(classId, month, s.id);
-    const saved = (cls.conduct && cls.conduct[month] && cls.conduct[month][s.id]) || {};
-    const rating = saved.rating || sug.rating;
-    rows.push([s.name, sug.attRate!==null?sug.attRate:'', sug.hwRate!==null?sug.hwRate:'', sug.violCount, CONDUCT_LABEL[rating], saved.note||'']);
-  });
-  const ws = XLSX.utils.aoa_to_sheet(rows);
-  const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, ws, monthLabel(month).slice(0,30));
-  XLSX.writeFile(wb, `Hanh-kiem-${cls.name.replace(/\s+/g,'_')}-${month}.xlsx`);
-  showToast('Đã xuất bảng hạnh kiểm.');
+  try{
+    const cls = getClass(classId);
+    if(!cls){ showToast('Không tìm thấy lớp để xuất.'); return; }
+    const rows = [['Học sinh','Chuyên cần (%)','Hoàn thành BT (%)','Số vi phạm','Xếp loại hạnh kiểm','Nhận xét']];
+    cls.students.forEach(s=>{
+      const sug = conductSuggestion(classId, month, s.id);
+      const saved = (cls.conduct && cls.conduct[month] && cls.conduct[month][s.id]) || {};
+      const rating = saved.rating || sug.rating;
+      rows.push([s.name, sug.attRate!==null?sug.attRate:'', sug.hwRate!==null?sug.hwRate:'', sug.violCount, CONDUCT_LABEL[rating], saved.note||'']);
+    });
+    const ws = XLSX.utils.aoa_to_sheet(rows);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, monthLabel(month).slice(0,30));
+    XLSX.writeFile(wb, `Hanh-kiem-${cls.name.replace(/\s+/g,'_')}-${month}.xlsx`);
+    showToast('Đã xuất bảng hạnh kiểm.');
+  }catch(err){
+    console.error('Lỗi xuất Excel hạnh kiểm:', err);
+    showToast('Không xuất được Excel — lỗi: ' + (err && err.message ? err.message : 'không rõ nguyên nhân') + '. Cô mở Console (F12) xem chi tiết giúp tôi nhé.', 6000);
+  }
 }
 
 /* ---- Điểm kiểm tra định kỳ hàng tháng ---- */
@@ -2963,19 +2969,25 @@ function renderActivitiesSection(classId, cls){
 }
 
 function exportExamsExcel(classId, month){
-  const cls = getClass(classId);
-  const monthData = (cls.monthlyExams && cls.monthlyExams[month]) || {};
-  const rows = [['Học sinh', ...EXAM_SUBJECTS.map(([,l])=>l), 'Điểm TB tháng']];
-  cls.students.forEach(s=>{
-    const rec = monthData[s.id] || {};
-    const avg = studentExamAvg(rec);
-    rows.push([s.name, ...EXAM_SUBJECTS.map(([k])=> (rec[k]!==undefined && rec[k]!==null) ? rec[k] : ''), avg!==null?avg.toFixed(1):'']);
-  });
-  const ws = XLSX.utils.aoa_to_sheet(rows);
-  const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, ws, ('DiemKT-'+monthLabel(month)).slice(0,30));
-  XLSX.writeFile(wb, `Diem-KT-thang-${cls.name.replace(/\s+/g,'_')}-${month}.xlsx`);
-  showToast('Đã xuất bảng điểm kiểm tra tháng.');
+  try{
+    const cls = getClass(classId);
+    if(!cls){ showToast('Không tìm thấy lớp để xuất.'); return; }
+    const monthData = (cls.monthlyExams && cls.monthlyExams[month]) || {};
+    const rows = [['Học sinh', ...EXAM_SUBJECTS.map(([,l])=>l), 'Điểm TB tháng']];
+    cls.students.forEach(s=>{
+      const rec = monthData[s.id] || {};
+      const avg = studentExamAvg(rec);
+      rows.push([s.name, ...EXAM_SUBJECTS.map(([k])=> (rec[k]!==undefined && rec[k]!==null) ? rec[k] : ''), avg!==null?avg.toFixed(1):'']);
+    });
+    const ws = XLSX.utils.aoa_to_sheet(rows);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, ('DiemKT-'+monthLabel(month)).slice(0,30));
+    XLSX.writeFile(wb, `Diem-KT-thang-${cls.name.replace(/\s+/g,'_')}-${month}.xlsx`);
+    showToast('Đã xuất bảng điểm kiểm tra tháng.');
+  }catch(err){
+    console.error('Lỗi xuất Excel điểm KT:', err);
+    showToast('Không xuất được Excel — lỗi: ' + (err && err.message ? err.message : 'không rõ nguyên nhân') + '. Cô mở Console (F12) xem chi tiết giúp tôi nhé.', 6000);
+  }
 }
 
 function buildExamReportPrompt(classId, month){
@@ -4563,45 +4575,52 @@ function exportWordDoc(){
   showToast('Đã xuất file Word.');
 }
 function exportExcel(){
-  const classId = state.attendance.classId || state.currentClassId;
-  const cls = getClass(classId);
-  const selectedMonth = state.attendance.month || 'all';
-  const allSessions = getSessions(classId);
-  const sessions = selectedMonth==='all' ? allSessions : allSessions.filter(s=>monthKey(s.date)===selectedMonth);
+  try{
+    const classId = state.attendance.classId || state.currentClassId;
+    const cls = getClass(classId);
+    if(!cls){ showToast('Chưa chọn được lớp để xuất — cô thử chọn lại lớp rồi bấm lại nhé.'); return; }
+    const selectedMonth = state.attendance.month || 'all';
+    const allSessions = getSessions(classId);
+    const sessions = selectedMonth==='all' ? allSessions : allSessions.filter(s=>monthKey(s.date)===selectedMonth);
+    if(!sessions.length){ showToast('Chưa có buổi học nào trong khoảng đang xem để xuất.'); return; }
 
-  const dayHeaders = sessions.map(s=>fmtDateVN(s.date));
-  const header = ['Học sinh', ...dayHeaders, 'Số buổi có dữ liệu', 'Có mặt', 'Vắng', 'Muộn', 'Tỷ lệ chuyên cần (%)'];
-  const rows = [header];
-  cls.students.forEach(s=>{
-    const att = attendanceFromSessions(sessions, s.id);
-    const dayCells = sessions.map(sess=>{
-      const a = sess.attendance[s.id];
-      if(a==='present') return 'X';
-      if(a==='absent') return 'V';
-      if(a==='late') return 'M';
-      return '';
+    const dayHeaders = sessions.map(s=>fmtDateVN(s.date));
+    const header = ['Học sinh', ...dayHeaders, 'Số buổi có dữ liệu', 'Có mặt', 'Vắng', 'Muộn', 'Tỷ lệ chuyên cần (%)'];
+    const rows = [header];
+    cls.students.forEach(s=>{
+      const att = attendanceFromSessions(sessions, s.id);
+      const dayCells = sessions.map(sess=>{
+        const a = sess.attendance[s.id];
+        if(a==='present') return 'X';
+        if(a==='absent') return 'V';
+        if(a==='late') return 'M';
+        return '';
+      });
+      rows.push([s.name, ...dayCells, att.total, att.present, att.absent, att.late, att.rate!==null?att.rate:'']);
     });
-    rows.push([s.name, ...dayCells, att.total, att.present, att.absent, att.late, att.rate!==null?att.rate:'']);
-  });
 
-  const ws = XLSX.utils.aoa_to_sheet(rows);
-  const wb = XLSX.utils.book_new();
-  const sheetLabel = (selectedMonth==='all' ? 'Chuyen can' : monthLabel(selectedMonth)).slice(0,30);
-  XLSX.utils.book_append_sheet(wb, ws, sheetLabel);
+    const ws = XLSX.utils.aoa_to_sheet(rows);
+    const wb = XLSX.utils.book_new();
+    const sheetLabel = (selectedMonth==='all' ? 'Chuyen can' : monthLabel(selectedMonth)).slice(0,30);
+    XLSX.utils.book_append_sheet(wb, ws, sheetLabel);
 
-  // Thêm sheet chú thích ký hiệu cho dễ đọc
-  const legendWs = XLSX.utils.aoa_to_sheet([
-    ['Ký hiệu', 'Ý nghĩa'],
-    ['X', 'Có mặt'],
-    ['V', 'Vắng'],
-    ['M', 'Muộn'],
-    ['(để trống)', 'Chưa điểm danh buổi đó'],
-  ]);
-  XLSX.utils.book_append_sheet(wb, legendWs, 'Chú thích');
+    // Thêm sheet chú thích ký hiệu cho dễ đọc
+    const legendWs = XLSX.utils.aoa_to_sheet([
+      ['Ký hiệu', 'Ý nghĩa'],
+      ['X', 'Có mặt'],
+      ['V', 'Vắng'],
+      ['M', 'Muộn'],
+      ['(để trống)', 'Chưa điểm danh buổi đó'],
+    ]);
+    XLSX.utils.book_append_sheet(wb, legendWs, 'Chú thích');
 
-  const fileMonthPart = selectedMonth==='all' ? '' : `-${selectedMonth}`;
-  XLSX.writeFile(wb, `Chuyen-can-${cls.name.replace(/\s+/g,'_')}${fileMonthPart}.xlsx`);
-  showToast('Đã xuất file Excel.');
+    const fileMonthPart = selectedMonth==='all' ? '' : `-${selectedMonth}`;
+    XLSX.writeFile(wb, `Chuyen-can-${cls.name.replace(/\s+/g,'_')}${fileMonthPart}.xlsx`);
+    showToast('Đã xuất file Excel.');
+  }catch(err){
+    console.error('Lỗi xuất Excel:', err);
+    showToast('Không xuất được Excel — lỗi: ' + (err && err.message ? err.message : 'không rõ nguyên nhân') + '. Cô mở Console (F12) xem chi tiết giúp tôi nhé.', 6000);
+  }
 }
 
 /* ============================================================
