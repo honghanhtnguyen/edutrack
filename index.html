@@ -456,7 +456,7 @@ const state = {
   tab: 'home',
   currentClassId: null,
   session: { activeId: null, date: todayISO(), prompt:'', sortKey:'default', sortDir:'desc' },
-  report: { classId:null, studentId:null, mode:'student', infographicDate:null, infographicPrompt:'' },
+  report: { classId:null, studentId:null, mode:'student', infographicDate:null, infographicPrompt:'', infographicScoreMode:'top' },
   progress: { classId:null, studentId:null, query:'' },
   attendance: { classId:null, month:'all' },
   contacts: { classId:null, studentId:null },
@@ -1743,7 +1743,7 @@ function generateClassRemark(classId){
 function trendArrow(d){ if(d===null||d===undefined) return ''; if(d>0) return '▲ '; if(d<0) return '▼ '; return '● '; }
 function trendColor(d){ return d===null||d===undefined ? 'var(--ink-soft)' : (d>0 ? 'var(--success)' : (d<0 ? 'var(--danger)' : 'var(--ink-soft)')); }
 
-function buildSessionInfographicPrompt(classId, date){
+function buildSessionInfographicPrompt(classId, date, scoreMode){
   const cls = getClass(classId);
   const session = (state.sessionsByClass[classId]||[]).find(s=>s.date===date);
   if(!cls || !session) return '';
@@ -1751,6 +1751,7 @@ function buildSessionInfographicPrompt(classId, date){
   const types = session.exerciseTypes || [];
   const exercises = session.exercises || [];
   const hasNote = !!(session.generalNote && session.generalNote.trim());
+  const showFull = scoreMode === 'full';
 
   const L = [];
   L.push('Bạn là trợ lý tạo INFOGRAPHIC BÁO CÁO TỔNG KẾT BUỔI HỌC gửi phụ huynh, dùng đúng số liệu dưới đây, không bịa thêm.');
@@ -1800,18 +1801,25 @@ function buildSessionInfographicPrompt(classId, date){
       L.push(`Điểm "${e.name}" ${titleSuffix}:`);
       if(!scored.length){ L.push('Chưa có điểm.'); return; }
 
-      // Chỉ hiện học sinh điểm cao (điểm >8, hoặc Top 5 cao nhất lớp — tính cả đồng điểm ở mốc thứ 5)
-      const sortedDesc = scored.slice().sort((a,b)=>b.score-a.score);
-      const top5CutoffScore = sortedDesc.length ? sortedDesc[Math.min(4, sortedDesc.length-1)].score : null;
-      const topScorers = scored.filter(x=> x.score>8 || (top5CutoffScore!==null && x.score>=top5CutoffScore));
+      if(showFull){
+        L.push('Điểm đầy đủ của cả lớp (liệt kê TẤT CẢ học sinh):');
+        L.push(scored.map(x=>`${x.name}: ${x.score.toFixed(1)}`).join(' · '));
+      } else {
+        // Chỉ hiện học sinh điểm cao (điểm >8, hoặc Top 5 cao nhất lớp — tính cả đồng điểm ở mốc thứ 5)
+        const sortedDesc = scored.slice().sort((a,b)=>b.score-a.score);
+        const top5CutoffScore = sortedDesc.length ? sortedDesc[Math.min(4, sortedDesc.length-1)].score : null;
+        const topScorers = scored.filter(x=> x.score>8 || (top5CutoffScore!==null && x.score>=top5CutoffScore));
 
-      L.push('Học sinh điểm cao (điểm >8 hoặc Top 5 cao nhất lớp) — chỉ liệt kê đúng những em này kèm điểm, các em khác không hiện tên/điểm:');
-      L.push(topScorers.length ? topScorers.map(x=>`${x.name}: ${x.score.toFixed(1)}`).join(' · ') : '(Không có học sinh nào đạt mốc điểm cao cho bài này.)');
+        L.push('Học sinh điểm cao (điểm >8 hoặc Top 5 cao nhất lớp) — chỉ liệt kê đúng những em này kèm điểm, các em khác không hiện tên/điểm:');
+        L.push(topScorers.length ? topScorers.map(x=>`${x.name}: ${x.score.toFixed(1)}`).join(' · ') : '(Không có học sinh nào đạt mốc điểm cao cho bài này.)');
+      }
 
       const max = Math.max(...scored.map(x=>x.score)), min = Math.min(...scored.map(x=>x.score));
       const avg = scored.reduce((a,b)=>a+b.score,0)/scored.length;
       const top = scored.filter(x=>x.score===max).map(x=>x.name).join(', ');
-      L.push(`Tổng kết (tính trên cả lớp, dùng để hiện số liệu chung, KHÔNG liệt kê thêm tên nào khác ngoài danh sách trên): Cao nhất ${max.toFixed(1)} — HS đạt: ${top} · Thấp nhất ${min.toFixed(1)} (không nêu tên) · TB lớp ${avg.toFixed(1)}`);
+      L.push(showFull
+        ? `Tổng kết: Cao nhất ${max.toFixed(1)} — HS đạt: ${top} · Thấp nhất ${min.toFixed(1)} · TB lớp ${avg.toFixed(1)}`
+        : `Tổng kết (tính trên cả lớp, dùng để hiện số liệu chung, KHÔNG liệt kê thêm tên nào khác ngoài danh sách trên): Cao nhất ${max.toFixed(1)} — HS đạt: ${top} · Thấp nhất ${min.toFixed(1)} (không nêu tên) · TB lớp ${avg.toFixed(1)}`);
     });
 
     // Ghi chú: gộp 1 lần duy nhất cho cả buổi (không lặp lại theo từng bài luyện tập)
@@ -1829,7 +1837,11 @@ function buildSessionInfographicPrompt(classId, date){
   L.push('SECTION 1 "NỘI DUNG BÀI HỌC": card trắng bo góc, dải/icon nhấn gradient xanh, danh sách gạch đầu dòng, từ khóa in đậm.');
   if(hasNote) L.push('SECTION "LƯU Ý BUỔI HỌC" (chỉ thêm mục này vì có nội dung): card trắng nhỏ gọn, icon 📌 nền gradient xanh, danh sách gạch đầu dòng ngắn.');
   L.push('SECTION "NỀN NẾP & Ý THỨC" / "BÀI TẬP VỀ NHÀ": 2 cột song song, chiều cao mỗi cột co giãn tự do theo nội dung (không cố định bằng nhau). Cột trái: icon mặt trời nền gradient xanh, chỉ liệt kê HS vắng/muộn dạng pill (đỏ nhạt "Vắng", cam "Muộn"); trống thì hiện "Cả lớp có mặt đầy đủ 🎉". Cột phải: icon cây bút nền gradient xanh, gồm 2 phần rõ rệt — (1) "Còn thiếu": trình bày theo từng đầu mục loại bài thiếu (tên loại bài làm tiêu đề nhỏ đậm), tên HS thiếu bài đó xếp thành pill cam ngay dưới, trống thì bỏ qua phần này; (2) ngay bên dưới, tiêu đề nhỏ "✅ Hoàn thành đầy đủ" — liệt kê tên các học sinh làm đủ tất cả bài (dạng pill xanh lá nhạt), lấy đúng danh sách "Học sinh hoàn thành ĐỦ tất cả bài tập" ở phần DỮ LIỆU; nếu rỗng thì bỏ qua phần này.');
-  L.push('SECTION "KẾT QUẢ BÀI KIỂM TRA/LUYỆN TẬP": icon bia bắn. Ngay dưới tiêu đề section, thêm 1 dòng phụ đề nhỏ, chữ nghiêng, màu xám xanh nhạt: "Cô đính kèm một số bài đạt điểm tốt trong lớp". QUAN TRỌNG — vì lý do bảo mật điểm số của trung tâm, KHÔNG được liệt kê điểm của toàn bộ học sinh, chỉ hiển thị đúng danh sách học sinh điểm cao đã cho trong phần DỮ LIỆU. Với mỗi đầu điểm: 1 bảng gọn 2 cột "Họ và tên" | "Điểm", TẤT CẢ điểm cùng 1 màu xanh dương đậm #2947C0 (không phân cấp màu theo mức điểm); nếu danh sách rỗng thì bỏ qua bảng đó, chỉ hiện phần tổng kết. Dưới mỗi bảng điểm có 3 badge nhỏ nền gradient xanh nhạt (VD #EAF1FF→#DCE8FF): "🏆 Cao nhất: [điểm] — [tên học sinh đạt điểm đó]" (BẮT BUỘC ghi tên, lấy đúng tên trong phần DỮ LIỆU), "📉 Thấp nhất: [điểm]" (CHỈ ghi điểm số, TUYỆT ĐỐI KHÔNG ghi tên học sinh nào ở badge này), "📊 TB lớp: [điểm]" (chữ điểm giữ màu xanh dương đậm #2947C0 phẳng để dễ đọc, chỉ nền badge là gradient). Nhiều đầu điểm thì xếp thành các khối liền nhau. SAU CÙNG — khi đã hết toàn bộ các đầu điểm, thêm 1 khung riêng biệt DUY NHẤT (không lặp lại theo từng bài), nền nhạt khác màu để phân biệt, tiêu đề nhỏ "📝 Ghi chú của giáo viên", nội dung lấy đúng từ dòng "Ghi chú của giáo viên" ở phần DỮ LIỆU; nếu rỗng thì bỏ qua cả khung này. TUYỆT ĐỐI KHÔNG tự thêm tên/điểm của học sinh nào ngoài danh sách đã cho, kể cả khi biết điểm của họ qua phần tổng kết.');
+  if(showFull){
+    L.push('SECTION "KẾT QUẢ BÀI KIỂM TRA/LUYỆN TẬP": icon bia bắn. Với mỗi đầu điểm: 1 bảng đầy đủ 2 cột "Họ và tên" | "Điểm" liệt kê TẤT CẢ học sinh trong lớp, TẤT CẢ điểm cùng 1 màu xanh dương đậm #2947C0 (không phân cấp màu theo mức điểm). Dưới mỗi bảng điểm có 3 badge nhỏ nền gradient xanh nhạt (VD #EAF1FF→#DCE8FF): "🏆 Cao nhất: [điểm] — [tên]", "📉 Thấp nhất: [điểm] — [tên]", "📊 TB lớp: [điểm]" (chữ điểm giữ màu xanh dương đậm #2947C0 phẳng để dễ đọc, chỉ nền badge là gradient). Nhiều đầu điểm thì xếp thành các khối liền nhau. SAU CÙNG — khi đã hết toàn bộ các đầu điểm, thêm 1 khung riêng biệt DUY NHẤT (không lặp lại theo từng bài), nền nhạt khác màu để phân biệt, tiêu đề nhỏ "📝 Ghi chú của giáo viên", nội dung lấy đúng từ dòng "Ghi chú của giáo viên" ở phần DỮ LIỆU; nếu rỗng thì bỏ qua cả khung này.');
+  } else {
+    L.push('SECTION "KẾT QUẢ BÀI KIỂM TRA/LUYỆN TẬP": icon bia bắn. Ngay dưới tiêu đề section, thêm 1 dòng phụ đề nhỏ, chữ nghiêng, màu xám xanh nhạt: "Cô đính kèm một số bài đạt điểm tốt trong lớp". QUAN TRỌNG — vì lý do bảo mật điểm số của trung tâm, KHÔNG được liệt kê điểm của toàn bộ học sinh, chỉ hiển thị đúng danh sách học sinh điểm cao đã cho trong phần DỮ LIỆU. Với mỗi đầu điểm: 1 bảng gọn 2 cột "Họ và tên" | "Điểm", TẤT CẢ điểm cùng 1 màu xanh dương đậm #2947C0 (không phân cấp màu theo mức điểm); nếu danh sách rỗng thì bỏ qua bảng đó, chỉ hiện phần tổng kết. Dưới mỗi bảng điểm có 3 badge nhỏ nền gradient xanh nhạt (VD #EAF1FF→#DCE8FF): "🏆 Cao nhất: [điểm] — [tên học sinh đạt điểm đó]" (BẮT BUỘC ghi tên, lấy đúng tên trong phần DỮ LIỆU), "📉 Thấp nhất: [điểm]" (CHỈ ghi điểm số, TUYỆT ĐỐI KHÔNG ghi tên học sinh nào ở badge này), "📊 TB lớp: [điểm]" (chữ điểm giữ màu xanh dương đậm #2947C0 phẳng để dễ đọc, chỉ nền badge là gradient). Nhiều đầu điểm thì xếp thành các khối liền nhau. SAU CÙNG — khi đã hết toàn bộ các đầu điểm, thêm 1 khung riêng biệt DUY NHẤT (không lặp lại theo từng bài), nền nhạt khác màu để phân biệt, tiêu đề nhỏ "📝 Ghi chú của giáo viên", nội dung lấy đúng từ dòng "Ghi chú của giáo viên" ở phần DỮ LIỆU; nếu rỗng thì bỏ qua cả khung này. TUYỆT ĐỐI KHÔNG tự thêm tên/điểm của học sinh nào ngoài danh sách đã cho, kể cả khi biết điểm của họ qua phần tổng kết.');
+  }
   L.push('FOOTER: chữ in nghiêng, canh giữa, xám nhạt: "Trân trọng cảm ơn Quý phụ huynh đã đồng hành cùng lớp học!"');
   L.push('');
   L.push('Dùng đúng số liệu ở phần DỮ LIỆU (tên, điểm, điểm danh, mức hoàn thành bài) để điền vào đúng mục tương ứng, toàn bộ tiếng Việt có dấu, không lỗi chính tả.');
@@ -1986,6 +1998,7 @@ function renderReport(){
     const infoDate = (state.report.infographicDate && sessionsForInfo.some(s=>s.date===state.report.infographicDate))
       ? state.report.infographicDate
       : (sessionsForInfo.length ? sessionsForInfo[sessionsForInfo.length-1].date : null);
+    const infoScoreMode = state.report.infographicScoreMode || 'top';
     return `
       <div class="topbar no-print">
         <div><h1 class="page-title">Báo cáo học tập</h1>${chalkUnderline()}<div class="page-sub">Tổng hợp tình hình học tập chung của cả lớp</div></div>
@@ -2012,8 +2025,16 @@ function renderReport(){
               ${sessionsForInfo.slice().reverse().map(s=>`<option value="${s.date}" ${infoDate===s.date?'selected':''}>${fmtDateVN(s.date)}</option>`).join('')}
             </select>
           </div>
-          <button class="btn btn-accent" data-action="generate-session-infographic-prompt" data-class="${classId}" data-date="${infoDate}">✨ Tạo prompt infographic</button>
+          <div style="flex:1; min-width:220px;">
+            <label class="field-label">Hiển thị điểm</label>
+            <select data-action="report-change-infographic-score-mode">
+              <option value="top" ${infoScoreMode==='top'?'selected':''}>Chỉ điểm nổi bật (ẩn bớt — cho trung tâm)</option>
+              <option value="full" ${infoScoreMode==='full'?'selected':''}>Đầy đủ điểm cả lớp</option>
+            </select>
+          </div>
+          <button class="btn btn-accent" data-action="generate-session-infographic-prompt" data-class="${classId}" data-date="${infoDate}" data-score-mode="${infoScoreMode}">✨ Tạo prompt infographic</button>
         </div>
+        <div class="tiny" style="margin-top:8px;">"Chỉ điểm nổi bật" = chỉ hiện tên học sinh điểm >8/Top 5/có ghi chú riêng (dùng cho lớp không muốn công khai hết điểm). "Đầy đủ điểm" = liệt kê điểm mọi học sinh trong lớp.</div>
       </div>
       ${state.report.infographicPrompt ? `
       <div class="card no-print">
@@ -5147,8 +5168,9 @@ async function handleAction(action, elx, e){
     /* ---- Report ---- */
     case 'report-change-class': state.report.classId = elx.value; state.report.studentId=null; render(); break;
     case 'report-change-infographic-date': state.report.infographicDate = elx.value; render(); break;
+    case 'report-change-infographic-score-mode': state.report.infographicScoreMode = elx.value; render(); break;
     case 'generate-session-infographic-prompt': {
-      const text = buildSessionInfographicPrompt(elx.dataset.class, elx.dataset.date);
+      const text = buildSessionInfographicPrompt(elx.dataset.class, elx.dataset.date, elx.dataset.scoreMode);
       if(text){ state.report.infographicPrompt = text; render(); }
       else { showToast('Không tạo được prompt — chưa có dữ liệu buổi học này.'); }
       break;
