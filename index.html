@@ -1523,7 +1523,7 @@ function renderSession(){
               ${types.length? `<th colspan="${types.length}" style="text-align:center;">Checklist bài tập</th>` : ''}
               ${exercises.length? `<th colspan="${exercises.length}" style="text-align:center;">Điểm luyện tập</th>` : ''}
               <th rowspan="2" style="min-width:130px;">📌 Chép phạt</th>
-              <th rowspan="2" style="min-width:170px;">Ghi chú riêng</th>
+              <th rowspan="2" style="min-width:280px;">Ghi chú riêng</th>
             </tr>
             <tr>
               ${types.map(t=>`<th style="text-align:center;min-width:80px;">
@@ -1584,7 +1584,7 @@ function renderSession(){
                   <label style="display:flex;align-items:center;gap:4px;cursor:pointer;" title="Giao chép phạt buổi này"><input type="checkbox" ${assigned?'checked':''} data-action="toggle-punishment-assign" data-student="${st.id}"> Giao mới</label>
                 </div>
               </td>
-              <td><input type="text" placeholder="Lưu ý riêng..." value="${esc(sess.studentNotes[st.id]||'')}" data-action="set-note" data-student="${st.id}"></td>
+              <td><textarea rows="2" placeholder="Lưu ý riêng..." style="width:100%;min-width:260px;resize:vertical;white-space:pre-wrap;" data-action="set-note" data-student="${st.id}">${esc(sess.studentNotes[st.id]||'')}</textarea></td>
             </tr>`;
           }).join('')}
           </tbody>
@@ -2155,11 +2155,11 @@ function renderReport(){
         return `<h3 style="font-size:16.5px;margin-bottom:10px;">🗂️ Danh sách bài kiểm tra & bài tập gần đây</h3>
         <div style="overflow-x:auto;margin-bottom:22px;">
         <table>
-          <thead><tr><th style="width:95px;">Ngày</th><th>Tên bài</th><th style="width:130px;">Loại</th><th style="width:80px;text-align:center;">Điểm</th><th style="width:150px;">Trạng thái</th></tr></thead>
+          <thead><tr><th style="width:95px;">Ngày</th><th style="width:220px;max-width:220px;">Tên bài</th><th style="width:130px;">Loại</th><th style="width:80px;text-align:center;">Điểm</th><th style="width:150px;">Trạng thái</th></tr></thead>
           <tbody>
           ${recent.map(it=>`<tr class="ledger">
             <td class="mono">${fmtDateVN(it.date)}</td>
-            <td class="note-text">${esc(it.name)}</td>
+            <td class="note-text" style="max-width:220px;word-break:break-word;">${esc(it.name)}</td>
             <td>${esc(it.type)}</td>
             <td class="mono" style="text-align:center;">${esc(it.scoreText)}</td>
             <td>${esc(it.statusText)}</td>
