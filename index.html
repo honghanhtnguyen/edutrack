@@ -800,6 +800,30 @@ function studentChecklistStats(classId, studentId){
   return checklistFromSessions(getSessions(classId), studentId);
 }
 
+// Danh sách bài kiểm tra/luyện tập có điểm + bài tập (checklist) gần đây của 1 học sinh, mới nhất trước
+function studentRecentItems(classId, studentId, limit){
+  const sessions = getSessions(classId);
+  const items = [];
+  sessions.forEach(s=>{
+    (s.exercises||[]).forEach(e=>{
+      const raw = (s.scores[studentId]||{})[e.id];
+      if(raw===undefined || raw===null || raw==='') return;
+      const score10 = exerciseScoreOn10(e, raw);
+      if(score10===null) return;
+      const label = score10>=8?'Tốt': score10>=6.5?'Khá': score10>=5?'Đạt':'Cần cố gắng';
+      items.push({date:s.date, name:e.name || 'Bài kiểm tra', type:'Kiểm tra/Luyện tập', scoreText: score10.toFixed(1)+'/10', statusText: label});
+    });
+    (s.exerciseTypes||[]).forEach(t=>{
+      const v = (s.checklist[studentId]||{})[t.id];
+      if(!v) return;
+      const label = v==='full'?'Hoàn thành đầy đủ': v==='partial'?'Hoàn thành một phần':'Chưa làm';
+      items.push({date:s.date, name:t.name || 'Bài tập về nhà', type:'BTVN', scoreText:'—', statusText: label});
+    });
+  });
+  items.sort((a,b)=> a.date < b.date ? 1 : (a.date > b.date ? -1 : 0));
+  return limit ? items.slice(0, limit) : items;
+}
+
 function studentScoreSeries(classId, studentId){
   const sessions = getSessions(classId);
   const students = getStudents(classId).map(s=>s.id);
@@ -1952,6 +1976,23 @@ function renderClassReportBody(classId){
     <h3 style="font-size:16.5px;margin-bottom:10px;">Diễn biến điểm trung bình của lớp</h3>
     <div style="margin-bottom:18px;">${chartSvg}</div>
 
+    ${validAvgs.length ? (() => {
+      const distBuckets = [
+        {label:'Giỏi (≥8)', value:0, color:'var(--success)'},
+        {label:'Khá (6.5–7.9)', value:0, color:'var(--accent-deep)'},
+        {label:'Trung bình (5–6.4)', value:0, color:'var(--late)'},
+        {label:'Yếu (<5)', value:0, color:'var(--danger)'},
+      ];
+      validAvgs.forEach(v=>{
+        if(v>=8) distBuckets[0].value++;
+        else if(v>=6.5) distBuckets[1].value++;
+        else if(v>=5) distBuckets[2].value++;
+        else distBuckets[3].value++;
+      });
+      return `<h3 style="font-size:16.5px;margin-bottom:10px;">🥧 Phân bố học lực theo điểm trung bình</h3>
+      <div style="margin-bottom:18px;">${pieChartWithLegend(distBuckets)}</div>`;
+    })() : ''}
+
     <h3 style="font-size:16.5px;margin-bottom:10px;">Tổng hợp theo học sinh (toàn bộ)</h3>
     <table style="margin-bottom:18px;"><thead><tr><th>Học sinh</th><th>Chuyên cần</th><th>Điểm TB</th><th>So với TB lớp</th><th>Hoàn thành BT</th><th>Ghi chú</th></tr></thead><tbody>
     ${students.map((s,i)=>{
@@ -2081,6 +2122,52 @@ function renderReport(){
           <div class="muted">Lớp: ${esc(cls.name)} · Ngày xuất: ${fmtDateVN(todayISO())}</div>
         </div>
       </div>
+
+      ${(() => {
+        const attStats = studentAttendanceStats(classId, studentId);
+        const clStats = studentChecklistStats(classId, studentId);
+        if(!attStats.total && !clStats.total) return '';
+        const attSub = attStats.total ? `Có mặt ${attStats.present} · Vắng ${attStats.absent} · Muộn ${attStats.late}` : '';
+        const clSub = clStats.total ? `Đầy đủ ${clStats.full} · Một phần ${clStats.partial} · Chưa làm ${clStats.none}` : '';
+        const attColor = attStats.rate===null ? 'var(--accent)' : attStats.rate>=80 ? 'var(--success)' : attStats.rate>=50 ? 'var(--late)' : 'var(--danger)';
+        const clColor = clStats.rate===null ? 'var(--accent)' : clStats.rate>=80 ? 'var(--success)' : clStats.rate>=50 ? 'var(--late)' : 'var(--danger)';
+        return `<div style="display:flex; gap:28px; flex-wrap:wrap; margin-bottom:20px;">
+          <div style="flex:1; min-width:220px; display:flex; align-items:center; gap:16px;">
+            ${attStats.total ? progressRingSVG(attStats.rate, {color: attColor, centerSub:'Chuyên cần'}) : progressRingSVG(0, {centerMain:'—', centerSub:'Chuyên cần'})}
+            <div>
+              <h3 style="font-size:15px;margin-bottom:6px;">📅 Chuyên cần</h3>
+              <div class="muted" style="font-size:13.5px;">${attSub || 'Chưa có dữ liệu điểm danh.'}</div>
+            </div>
+          </div>
+          <div style="flex:1; min-width:220px; display:flex; align-items:center; gap:16px;">
+            ${clStats.total ? progressRingSVG(clStats.rate, {color: clColor, centerSub:'Hoàn thành BT'}) : progressRingSVG(0, {centerMain:'—', centerSub:'Hoàn thành BT'})}
+            <div>
+              <h3 style="font-size:15px;margin-bottom:6px;">📝 Hoàn thành bài tập</h3>
+              <div class="muted" style="font-size:13.5px;">${clSub || 'Chưa có dữ liệu bài tập.'}</div>
+            </div>
+          </div>
+        </div>`;
+      })()}
+
+      ${(() => {
+        const recent = studentRecentItems(classId, studentId, 8);
+        if(!recent.length) return '';
+        return `<h3 style="font-size:16.5px;margin-bottom:10px;">🗂️ Danh sách bài kiểm tra & bài tập gần đây</h3>
+        <div style="overflow-x:auto;margin-bottom:22px;">
+        <table>
+          <thead><tr><th style="width:95px;">Ngày</th><th>Tên bài</th><th style="width:130px;">Loại</th><th style="width:80px;text-align:center;">Điểm</th><th style="width:150px;">Trạng thái</th></tr></thead>
+          <tbody>
+          ${recent.map(it=>`<tr class="ledger">
+            <td class="mono">${fmtDateVN(it.date)}</td>
+            <td class="note-text">${esc(it.name)}</td>
+            <td>${esc(it.type)}</td>
+            <td class="mono" style="text-align:center;">${esc(it.scoreText)}</td>
+            <td>${esc(it.statusText)}</td>
+          </tr>`).join('')}
+          </tbody>
+        </table>
+        </div>`;
+      })()}
 
       ${allSessions.length ? `
       <div style="overflow-x:auto;">
@@ -4346,6 +4433,70 @@ function lineChartSVG(labels, series){
   }).join('');
 
   return `<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto;max-height:260px;">${gridLines.join('')}${lines}${xLabels}</svg>`;
+}
+
+function pieChartSVG(data){
+  const size = 160, r = 70, cx = 80, cy = 80;
+  const total = data.reduce((a,b)=>a+b.value,0);
+  if(!total) return `<svg viewBox="0 0 ${size} ${size}" style="width:140px;height:140px;flex-shrink:0;"><circle cx="${cx}" cy="${cy}" r="${r}" fill="#EFEAE0"/></svg>`;
+  const toRad = a => (a*Math.PI/180);
+  let angle = -90;
+  const parts = data.filter(d=>d.value>0).map(d=>{
+    const frac = d.value/total;
+    const startAngle = angle;
+    const endAngle = angle + frac*360;
+    angle = endAngle;
+    const color = resolveVar(d.color);
+    if(frac >= 0.9999){
+      return `<circle cx="${cx}" cy="${cy}" r="${r}" fill="${color}"/>`;
+    }
+    const large = (endAngle-startAngle) > 180 ? 1 : 0;
+    const x1 = cx + r*Math.cos(toRad(startAngle));
+    const y1 = cy + r*Math.sin(toRad(startAngle));
+    const x2 = cx + r*Math.cos(toRad(endAngle));
+    const y2 = cy + r*Math.sin(toRad(endAngle));
+    return `<path d="M${cx},${cy} L${x1.toFixed(2)},${y1.toFixed(2)} A${r},${r} 0 ${large} 1 ${x2.toFixed(2)},${y2.toFixed(2)} Z" fill="${color}" stroke="#fff" stroke-width="1.5"/>`;
+  }).join('');
+  return `<svg viewBox="0 0 ${size} ${size}" style="width:140px;height:140px;flex-shrink:0;">${parts}</svg>`;
+}
+function progressRingSVG(percent, opts){
+  opts = opts || {};
+  const size = opts.size || 132;
+  const stroke = opts.stroke || 12;
+  const color = resolveVar(opts.color || 'var(--accent)');
+  const bg = '#EFEAE0';
+  const r = (size - stroke)/2;
+  const cx = size/2, cy = size/2;
+  const circumference = 2*Math.PI*r;
+  const pct = (percent===null || percent===undefined || isNaN(percent)) ? 0 : Math.max(0, Math.min(100, percent));
+  const dash = circumference * pct/100;
+  const mainText = opts.centerMain !== undefined ? opts.centerMain : `${Math.round(pct)}%`;
+  const subText = opts.centerSub || '';
+  return `<div style="position:relative;width:${size}px;height:${size}px;flex-shrink:0;">
+    <svg viewBox="0 0 ${size} ${size}" style="width:${size}px;height:${size}px;transform:rotate(-90deg);">
+      <circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="${bg}" stroke-width="${stroke}"/>
+      ${pct>0 ? `<circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="${color}" stroke-width="${stroke}" stroke-linecap="round" stroke-dasharray="${dash.toFixed(1)} ${circumference.toFixed(1)}"/>` : ''}
+    </svg>
+    <div style="position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;">
+      <div style="font-size:${Math.round(size*0.19)}px;font-weight:800;color:var(--ink);line-height:1;">${esc(String(mainText))}</div>
+      ${subText? `<div style="font-size:${Math.round(size*0.078)}px;color:var(--ink-soft);margin-top:4px;text-align:center;max-width:${size-20}px;">${esc(subText)}</div>` : ''}
+    </div>
+  </div>`;
+}
+function pieChartWithLegend(data){
+  const total = data.reduce((a,b)=>a+b.value,0);
+  const svg = pieChartSVG(data);
+  const legend = data.map(d=>{
+    const pct = total? Math.round(d.value/total*100) : 0;
+    return `<div style="display:flex;align-items:center;gap:7px;margin-bottom:6px;">
+      <span style="width:11px;height:11px;border-radius:3px;background:${resolveVar(d.color)};display:inline-block;flex-shrink:0;"></span>
+      <span style="font-size:13.5px;">${esc(d.label)}: <strong>${d.value}</strong>${total? ` (${pct}%)` : ''}</span>
+    </div>`;
+  }).join('');
+  return `<div style="display:flex; align-items:center; gap:18px; flex-wrap:wrap;">
+    ${svg}
+    <div>${legend}</div>
+  </div>`;
 }
 
 /* ============================================================
