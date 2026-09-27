@@ -3595,8 +3595,18 @@ function renderTeamsSection(classId, cls){
     ${monthLog.length? `
     <div class="card">
       <div class="card-title">Lịch sử điều chỉnh trong tháng ${monthLabel(month)}</div>
-      <table><thead><tr><th>Ngày</th><th>Tổ</th><th>Điểm</th><th>Lý do</th></tr></thead><tbody>
-      ${monthLog.map(l=>`<tr class="ledger"><td>${fmtDateVN(l.date)}</td><td>${esc(teamName(l.teamId))}</td><td class="mono">${l.points>=0?'+':''}${l.points}</td><td class="note-text">${esc(l.reason||'')}</td></tr>`).join('')}
+      <table><thead><tr><th>Ngày</th><th>Tổ</th><th>Điểm</th><th>Lý do</th><th class="no-print" style="width:120px;">Thao tác</th></tr></thead><tbody>
+      ${monthLog.map(l=>`<tr class="ledger">
+        <td>${fmtDateVN(l.date)}</td>
+        <td>${esc(teamName(l.teamId))}</td>
+        <td class="mono">${l.points>=0?'+':''}${l.points}</td>
+        <td class="note-text">${esc(l.reason||'')}</td>
+        <td class="no-print" style="white-space:nowrap;">
+          <button class="btn btn-outline btn-sm" title="Sửa điểm" data-action="edit-team-score-points" data-class="${classId}" data-id="${l.id}">✎ Điểm</button>
+          <button class="btn btn-outline btn-sm" title="Sửa lý do" data-action="edit-team-score-reason" data-class="${classId}" data-id="${l.id}">✎ Lý do</button>
+          <button class="btn btn-danger-outline btn-sm" title="Xoá" data-action="delete-team-score" data-class="${classId}" data-id="${l.id}">🗑</button>
+        </td>
+      </tr>`).join('')}
       </tbody></table>
     </div>` : ''}
 
@@ -5803,6 +5813,38 @@ async function handleAction(action, elx, e){
       render(); saveClasses();
       showToast('Đã áp dụng điều chỉnh.');
       setTimeout(()=>{ const i=document.getElementById('score-points'); if(i) i.focus(); }, 0);
+      break;
+    }
+    case 'edit-team-score-points': {
+      const cls = getClass(elx.dataset.class);
+      const entry = (cls.teamScores||[]).find(e=>e.id===elx.dataset.id);
+      if(!entry) break;
+      openPromptModal('Sửa điểm điều chỉnh (số âm = trừ điểm)', String(entry.points), (val)=>{
+        const v = Number(val);
+        if(val==='' || isNaN(v) || v===0){ showToast('Điểm không hợp lệ (phải là số khác 0).'); return; }
+        entry.points = v;
+        saveClasses();
+      }, {placeholder:'VD: 5 hoặc -3'});
+      break;
+    }
+    case 'edit-team-score-reason': {
+      const cls = getClass(elx.dataset.class);
+      const entry = (cls.teamScores||[]).find(e=>e.id===elx.dataset.id);
+      if(!entry) break;
+      openPromptModal('Sửa lý do điều chỉnh', entry.reason||'', (val)=>{
+        entry.reason = val.trim();
+        saveClasses();
+      }, {placeholder:'VD: Trực nhật sạch sẽ...'});
+      break;
+    }
+    case 'delete-team-score': {
+      const cls = getClass(elx.dataset.class);
+      const id = elx.dataset.id;
+      openConfirmModal('Xoá điều chỉnh điểm này? Không thể hoàn tác.', true, ()=>{
+        cls.teamScores = (cls.teamScores||[]).filter(e=>e.id!==id);
+        saveClasses();
+        showToast('Đã xoá điều chỉnh.');
+      });
       break;
     }
     case 'teams-change-month': state.teamsMonth = elx.value; render(); break;
