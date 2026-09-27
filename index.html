@@ -484,6 +484,7 @@ const state = {
   teamsMonth: null,
   teamsPrompts: {},
   classTeamsPrompt: '',
+  teamsReportPrompt: '',
   violationsSort: 'count-desc',
   globalSearch: '',
   studentProfileId: null,
@@ -3461,6 +3462,45 @@ function buildClassTeamsDiagramPrompt(classId, monthKey_){
   return L.join('\n');
 }
 
+function buildTeamsMonthReportPrompt(classId, monthKey_){
+  const cls = getClass(classId);
+  const teams = cls.teams || [];
+  if(!teams.length) return '';
+  const settings = getTeamSettings(cls);
+  const prevMonth_ = prevMonthKey(monthKey_);
+  const hasPrevData = getTeamMonthsAvailable(classId).includes(prevMonth_);
+  const results = teams.map(t=>{
+    const cur = computeTeamMonthScore(classId, t.id, monthKey_);
+    const prev = computeTeamMonthScore(classId, t.id, prevMonth_);
+    return { ...t, cur, prev, delta: hasPrevData ? cur.score - prev.score : null };
+  }).sort((a,b)=> b.cur.score - a.cur.score);
+
+  const L = [];
+  L.push('Bạn là trợ lý giúp giáo viên chủ nhiệm viết BÁO CÁO TỔNG KẾT THI ĐUA TỔ/NHÓM trong tháng, để thông báo trước lớp hoặc gửi cho Ban giám hiệu/phụ huynh.');
+  L.push('');
+  L.push(`Lớp: ${cls.name}`);
+  L.push(`Tháng: ${monthLabel(monthKey_)}`);
+  L.push(`Điểm khởi điểm mỗi tổ / tháng: ${settings.baseScore}`);
+  L.push(`Số tổ: ${teams.length}`);
+  L.push('');
+  L.push('=== BẢNG TỔNG KẾT THEO TỔ (đã xếp hạng theo điểm từ cao xuống thấp) ===');
+  results.forEach((t,i)=>{
+    const deltaText = t.delta===null ? 'chưa có dữ liệu tháng trước' : `${t.delta>=0?'+':''}${t.delta} so với tháng trước`;
+    L.push(`${i+1}. ${t.name} — Điểm cuối tháng: ${t.cur.score} (${deltaText})`);
+    L.push(`   + Điểm cộng: +${t.cur.totalBonus} (hoạt động phong trào: ${t.cur.activityCount} lượt / +${t.cur.activityBonus}; thưởng thủ công: +${t.cur.manualBonus})`);
+    L.push(`   − Điểm trừ: −${t.cur.totalPenalty} (vi phạm: ${t.cur.violationCount} lỗi / −${t.cur.violationDeduction}; phạt thủ công: −${t.cur.manualPenalty})`);
+  });
+  L.push('');
+  L.push('=== YÊU CẦU ===');
+  L.push('Hãy viết một BẢN BÁO CÁO TỔNG KẾT THI ĐUA TỔ/NHÓM của lớp trong tháng, gồm:');
+  L.push('1. Bảng xếp hạng đầy đủ các tổ (thứ hạng, điểm, điểm cộng, điểm trừ, số lỗi vi phạm) trình bày rõ ràng, dễ đọc.');
+  L.push('2. Nhận xét chung về tình hình thi đua tháng này (tổ nào tiến bộ/đi xuống rõ rệt so với tháng trước, xu hướng chung của cả lớp).');
+  L.push('3. Khen ngợi tổ dẫn đầu và nêu điểm mạnh; nhắc nhở nhẹ nhàng, mang tính xây dựng với (các) tổ xếp cuối.');
+  L.push('4. Một vài định hướng/lời động viên chung để các tổ cố gắng hơn trong tháng tới.');
+  L.push('5. Văn phong ngắn gọn, mạch lạc, phù hợp để đọc trước lớp hoặc gửi qua nhóm Zalo phụ huynh.');
+  return L.join('\n');
+}
+
 function renderTeamsSection(classId, cls){
   const teams = cls.teams || [];
   const settings = getTeamSettings(cls);
@@ -3483,7 +3523,10 @@ function renderTeamsSection(classId, cls){
     <div class="card" style="display:flex; gap:16px; align-items:flex-end; flex-wrap:wrap;">
       <div><label class="field-label">Tháng thi đua</label><input type="month" value="${month}" data-action="teams-change-month"></div>
       <div><label class="field-label">Điểm khởi điểm / tổ / tháng</label><input type="number" value="${settings.baseScore}" style="width:80px;" data-action="teams-set-base-score"></div>
-      ${results.length? `<button class="btn btn-outline" style="margin-left:auto;" data-action="generate-class-teams-prompt" data-class="${classId}" data-month="${month}">✨ Tạo sơ đồ nhóm cả lớp</button>` : ''}
+      ${results.length? `<div style="margin-left:auto; display:flex; gap:8px; flex-wrap:wrap;">
+        <button class="btn btn-outline" data-action="generate-teams-report-prompt" data-class="${classId}" data-month="${month}">📄 Tạo prompt báo cáo thi đua tháng</button>
+        <button class="btn btn-outline" data-action="generate-class-teams-prompt" data-class="${classId}" data-month="${month}">✨ Tạo sơ đồ nhóm cả lớp</button>
+      </div>` : ''}
     </div>
 
     <div class="card">
@@ -3555,6 +3598,16 @@ function renderTeamsSection(classId, cls){
       <table><thead><tr><th>Ngày</th><th>Tổ</th><th>Điểm</th><th>Lý do</th></tr></thead><tbody>
       ${monthLog.map(l=>`<tr class="ledger"><td>${fmtDateVN(l.date)}</td><td>${esc(teamName(l.teamId))}</td><td class="mono">${l.points>=0?'+':''}${l.points}</td><td class="note-text">${esc(l.reason||'')}</td></tr>`).join('')}
       </tbody></table>
+    </div>` : ''}
+
+    ${state.teamsReportPrompt ? `
+    <div class="card">
+      <div class="card-title">
+        <span>📄 Prompt báo cáo thi đua tháng</span>
+        <button class="btn btn-outline btn-sm" data-action="copy-teams-report-prompt">💬 Copy</button>
+      </div>
+      <div class="muted" style="margin-bottom:8px;">Dán vào ChatGPT để viết bản báo cáo tổng kết thi đua tổ/nhóm đầy đủ (bảng xếp hạng, điểm cộng/trừ, số lỗi, nhận xét chung).</div>
+      <textarea id="teams-report-prompt-text" rows="14">${esc(state.teamsReportPrompt)}</textarea>
     </div>` : ''}
 
     ${state.classTeamsPrompt ? `
@@ -5778,6 +5831,20 @@ async function handleAction(action, elx, e){
       const text = el ? el.value : state.classTeamsPrompt;
       copyTextToClipboard(text).then(ok=>{
         showToast(ok ? 'Đã copy — dán vào ChatGPT để tạo sơ đồ.' : 'Không copy được, cô bôi đen (Ctrl+A) rồi Ctrl+C nhé.', 3200);
+      });
+      break;
+    }
+    case 'generate-teams-report-prompt': {
+      const text = buildTeamsMonthReportPrompt(elx.dataset.class, elx.dataset.month);
+      if(text){ state.teamsReportPrompt = text; render(); }
+      else { showToast('Chưa có tổ nào để tạo báo cáo.'); }
+      break;
+    }
+    case 'copy-teams-report-prompt': {
+      const el = document.getElementById('teams-report-prompt-text');
+      const text = el ? el.value : state.teamsReportPrompt;
+      copyTextToClipboard(text).then(ok=>{
+        showToast(ok ? 'Đã copy — dán vào ChatGPT để viết báo cáo.' : 'Không copy được, cô bôi đen (Ctrl+A) rồi Ctrl+C nhé.', 3200);
       });
       break;
     }
