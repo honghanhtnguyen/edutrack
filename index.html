@@ -3573,7 +3573,7 @@ function renderTeamsSection(classId, cls){
     <div class="card">
       <div class="card-title">Phân tổ học sinh</div>
       <div class="muted" style="margin-bottom:10px;">⭐ cạnh tên = thành viên tích cực trong tháng (tổng điểm cộng từ hoạt động phong trào ≥ 8).</div>
-      <table><thead><tr><th>Học sinh</th><th>Tổ</th><th style="text-align:center;">Hạng tổ</th></tr></thead><tbody>
+      <table><thead><tr><th>Học sinh</th><th>Tổ</th><th style="text-align:center;">Hạng tổ</th><th class="no-print" style="width:110px;">Thao tác</th></tr></thead><tbody>
       ${cls.students.map(s=>{
         const rank = s.teamId ? results.findIndex(t=>t.id===s.teamId)+1 : 0;
         const active = isStudentActiveThisMonth(s, month);
@@ -3587,6 +3587,9 @@ function renderTeamsSection(classId, cls){
             </select>
           </td>
           <td class="mono" style="text-align:center;">${rank? (medal[rank-1]||('#'+rank)) : '—'}</td>
+          <td class="no-print">
+            ${s.teamId ? `<button class="btn btn-outline btn-sm" title="Cộng/trừ điểm tổ qua học sinh này" data-action="quick-add-team-score" data-class="${classId}" data-student="${s.id}">± Điểm tổ</button>` : `<span class="tiny muted">Chưa có tổ</span>`}
+          </td>
         </tr>`;
       }).join('')}
       </tbody></table>
@@ -5796,6 +5799,27 @@ async function handleAction(action, elx, e){
       const cls = getClass(classId);
       const st = cls.students.find(s=>s.id===studentId);
       if(st){ st.teamId = elx.value; saveClasses(); }
+      break;
+    }
+    case 'quick-add-team-score': {
+      const classId = elx.dataset.class, studentId = elx.dataset.student;
+      const cls = getClass(classId);
+      const st = cls.students.find(s=>s.id===studentId);
+      if(!st || !st.teamId){ showToast('Học sinh chưa được phân tổ.'); break; }
+      const team = (cls.teams||[]).find(t=>t.id===st.teamId);
+      openPromptModal(`± Điểm tổ cho ${st.name}${team? ' ('+team.name+')' : ''}`, '', (val)=>{
+        const trimmed = (val||'').trim();
+        if(!trimmed) return;
+        const m = trimmed.match(/^(-?\d+(?:\.\d+)?)\s*(.*)$/);
+        if(!m){ showToast('Nhập số điểm trước, VD: 3 Tích cực phát biểu'); return; }
+        const points = Number(m[1]);
+        if(!points){ showToast('Điểm phải khác 0.'); return; }
+        const reason = (m[2]||'').trim() || `${st.name} — điều chỉnh nhanh`;
+        if(!cls.teamScores) cls.teamScores = [];
+        cls.teamScores.push({id: uid(), teamId: st.teamId, points, reason, date: todayISO()});
+        saveClasses();
+        showToast(`Đã ${points>=0?'cộng':'trừ'} ${Math.abs(points)} điểm cho ${team? team.name : 'tổ'} (qua ${st.name}).`);
+      }, {placeholder:'VD: 3 Tích cực phát biểu  hoặc  -2 Nói chuyện riêng', hint:'Nhập số điểm trước (số âm để trừ), có thể thêm lý do phía sau — điểm sẽ cộng thẳng vào điểm tổ của em.'});
       break;
     }
     case 'add-team-score': {
