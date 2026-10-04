@@ -459,6 +459,7 @@ const state = {
   report: { classId:null, studentId:null, mode:'student', infographicDate:null, infographicPrompt:'', infographicScoreMode:'top' },
   progress: { classId:null, studentId:null, query:'' },
   attendance: { classId:null, month:'all' },
+  gradebook: { classId:null },
   contacts: { classId:null, studentId:null },
   certificates: { classId:null, studentId:null, type:'session', sessionDate:null, month:null, description:'' },
   challenges: { classId:null },
@@ -926,6 +927,7 @@ const NAV = [
   {id:'report', icon:'▣', label:'Báo cáo', group:'periodic'},
   {id:'progress', icon:'∿', label:'Tiến độ', group:'periodic'},
   {id:'attendance', icon:'☷', label:'Chuyên cần', group:'periodic'},
+  {id:'gradebook', icon:'📒', label:'Sổ điểm', group:'periodic'},
   {id:'contacts', icon:'☎', label:'Trao đổi PH', group:'periodic'},
   {id:'homeroom', icon:'🎓', label:'Chủ nhiệm', group:'periodic'},
   {id:'honors', icon:'🎖️', label:'Vinh danh', group:'periodic'},
@@ -1007,6 +1009,7 @@ function renderTab(){
     case 'report': return renderReport();
     case 'progress': return renderProgress();
     case 'attendance': return renderAttendanceExport();
+    case 'gradebook': return renderGradebook();
     case 'contacts': return renderContacts();
     case 'certificates': return renderCertificates();
     case 'challenges': return renderChallenges();
@@ -1342,8 +1345,9 @@ function renderClasses(){
           <div style="display:flex;align-items:center;justify-content:space-between;padding:9px 0;border-bottom:1px solid var(--line);">
             <div style="cursor:pointer;flex:1;" data-action="select-class" data-id="${c.id}">
               <div style="font-weight:600; ${c.id===state.currentClassId?'color:var(--accent-deep);':''}">${esc(c.name)}</div>
-              <div class="tiny">${c.students.length} học sinh</div>
+              <div class="tiny">${c.students.length} học sinh${c.hasGradebook ? ' · 📒 có sổ điểm' : ''}</div>
             </div>
+            <button class="btn ${c.hasGradebook?'btn-accent':'btn-outline'} btn-sm" title="Bật/tắt sổ điểm riêng cho lớp này" data-action="toggle-gradebook" data-id="${c.id}">📒 ${c.hasGradebook?'Sổ điểm: Bật':'Bật sổ điểm'}</button>
             <button class="btn btn-outline btn-sm" data-action="rename-class" data-id="${c.id}">Sửa tên</button>
             <button class="btn btn-danger-outline btn-sm" data-action="delete-class" data-id="${c.id}">Xoá</button>
           </div>
@@ -1369,6 +1373,138 @@ function renderClasses(){
             </tbody></table>` : `<div class="muted">Lớp chưa có học sinh nào.</div>`)
         }
       </div>
+    </div>
+  `;
+}
+
+/* ============================================================
+   SỔ ĐIỂM (chỉ lớp được bật hasGradebook)
+   ĐTB = (tổng 4 bài HS1 + 2×HS2 + 3×HS3) / 9. Điểm miệng là điểm dự phòng: bù vào ô HS1 còn trống.
+============================================================ */
+function gbParse(v){
+  if(v===null || v===undefined || v==='') return null;
+  const n = Number(v);
+  return isNaN(n) ? null : Math.max(0, Math.min(10, n));
+}
+function gbRecord(cls, sid){
+  if(!cls.gradebook) cls.gradebook = {};
+  if(!cls.gradebook[sid]) cls.gradebook[sid] = {hs1:[null,null,null,null], oral:null, hs2:null, hs3:null};
+  const r = cls.gradebook[sid];
+  if(!Array.isArray(r.hs1)) r.hs1 = [null,null,null,null];
+  while(r.hs1.length<4) r.hs1.push(null);
+  return r;
+}
+function computeGradebookAvg(rec){
+  rec = rec || {};
+  const used = (rec.hs1||[]).slice(0,4).map(gbParse).filter(v=>v!==null);
+  const hs1Count = used.length;
+  const oral = gbParse(rec.oral), hs2 = gbParse(rec.hs2), hs3 = gbParse(rec.hs3);
+  let usedOral = false;
+  if(oral!==null && used.length<4){ used.push(oral); usedOral = true; }
+  let sum = used.reduce((a,b)=>a+b,0), w = used.length;
+  if(hs2!==null){ sum += hs2*2; w += 2; }
+  if(hs3!==null){ sum += hs3*3; w += 3; }
+  if(!w) return {avg:null, complete:false, usedOral:false};
+  return {avg: sum/w, complete: (used.length===4 && hs2!==null && hs3!==null), usedOral};
+}
+function gbAvgStyle(a){
+  if(a===null) return '';
+  return a>=8 ? 'color:var(--success);' : (a<5 ? 'color:var(--danger);' : '');
+}
+function gbFooterStats(cls){
+  const cols = {};
+  const push = (k,v)=>{ if(v!==null){ (cols[k]=cols[k]||[]).push(v); } };
+  const avgs = [];
+  cls.students.forEach(s=>{
+    const r = (cls.gradebook||{})[s.id] || {};
+    (r.hs1||[]).slice(0,4).forEach((v,i)=> push('hs1_'+i, gbParse(v)));
+    push('oral', gbParse(r.oral)); push('hs2', gbParse(r.hs2)); push('hs3', gbParse(r.hs3));
+    const c = computeGradebookAvg(r);
+    if(c.avg!==null) avgs.push(c.avg);
+  });
+  const mean = arr => arr && arr.length ? arr.reduce((a,b)=>a+b,0)/arr.length : null;
+  const out = {};
+  ['hs1_0','hs1_1','hs1_2','hs1_3','oral','hs2','hs3'].forEach(k=> out[k] = mean(cols[k]));
+  out.avg = mean(avgs);
+  return out;
+}
+function updateGradebookDom(classId){
+  const cls = getClass(classId);
+  if(!cls) return;
+  const app = document.getElementById('app');
+  cls.students.forEach(s=>{
+    const cell = app.querySelector('[data-gb-avg="'+s.id+'"]');
+    if(!cell) return;
+    const c = computeGradebookAvg((cls.gradebook||{})[s.id]);
+    cell.textContent = c.avg!==null ? c.avg.toFixed(1) : '—';
+    cell.style.cssText = gbAvgStyle(c.avg) + (c.avg!==null && !c.complete ? 'opacity:.6;' : '');
+    cell.title = c.avg===null ? '' : (c.complete ? 'Đủ cột điểm' : 'Tạm tính — chưa đủ cột điểm') + (c.usedOral ? ' · đã dùng điểm miệng bù HS1' : '');
+  });
+  const f = gbFooterStats(cls);
+  Object.keys(f).forEach(k=>{
+    const el = app.querySelector('[data-gb-foot="'+k+'"]');
+    if(el) el.textContent = f[k]!==null ? f[k].toFixed(1) : '—';
+  });
+}
+function renderGradebook(){
+  const head = `<div class="topbar"><div><h1 class="page-title">Sổ điểm</h1>${chalkUnderline()}<div class="page-sub">Nhập điểm thường xuyên, giữa kỳ, cuối kỳ — tự tính điểm trung bình</div></div></div>`;
+  const eligible = state.classes.filter(c=>c.hasGradebook);
+  if(!eligible.length){
+    return head + `<div class="card empty"><h3>Chưa có lớp nào dùng sổ điểm</h3><div class="muted">Vào tab "Lớp học" → bấm "📒 Bật sổ điểm" ở lớp cần quản lý điểm.</div></div>`;
+  }
+  let classId = state.gradebook.classId;
+  if(!eligible.some(c=>c.id===classId)) classId = eligible[0].id;
+  const cls = getClass(classId);
+  const classOptions = eligible.map(c=>`<option value="${c.id}" ${c.id===classId?'selected':''}>${esc(c.name)}</option>`).join('');
+  const inp = (sid, key, idx, val) => `<input class="score-input gb-input" type="number" min="0" max="10" step="0.1" inputmode="decimal" value="${(val===null||val===undefined)?'':val}" data-action="set-grade" data-class="${classId}" data-student="${sid}" data-key="${key}" data-idx="${idx}" data-col="${key}${idx}">`;
+  const f = gbFooterStats(cls);
+  const fv = k => f[k]!==null ? f[k].toFixed(1) : '—';
+  return head + `
+    <div class="card" style="display:flex; gap:16px; align-items:flex-end; flex-wrap:wrap;">
+      <div><label class="field-label">Lớp</label><select class="class-select" data-action="gradebook-change-class">${classOptions}</select></div>
+      <div class="tiny" style="flex:1; min-width:240px;">ĐTB = (tổng 4 bài HS1 + 2 × HS2 + 3 × HS3) ÷ 9. Điểm miệng là điểm dự phòng — chỉ được tính khi còn thiếu ô HS1. Chưa đủ cột điểm thì ĐTB hiện mờ (tạm tính). Enter để nhảy xuống ô dưới.</div>
+    </div>
+    <div class="card">
+      ${cls.students.length ? `
+      <div style="overflow-x:auto;">
+      <table class="session-table" style="min-width:860px;">
+        <thead>
+          <tr>
+            <th rowspan="2" style="width:36px;">#</th>
+            <th rowspan="2" style="min-width:150px;">Học sinh</th>
+            <th colspan="4" style="text-align:center;">Hệ số 1 (4 bài)</th>
+            <th rowspan="2" style="text-align:center;">Điểm miệng<div class="tiny" style="text-transform:none;letter-spacing:0;">(dự phòng)</div></th>
+            <th rowspan="2" style="text-align:center;">Hệ số 2<div class="tiny" style="text-transform:none;letter-spacing:0;">(1 bài)</div></th>
+            <th rowspan="2" style="text-align:center;">Hệ số 3<div class="tiny" style="text-transform:none;letter-spacing:0;">(1 bài)</div></th>
+            <th rowspan="2" style="text-align:center;min-width:80px;">ĐTB</th>
+          </tr>
+          <tr><th style="text-align:center;">Bài 1</th><th style="text-align:center;">Bài 2</th><th style="text-align:center;">Bài 3</th><th style="text-align:center;">Bài 4</th></tr>
+        </thead>
+        <tbody>
+        ${cls.students.map((s,i)=>{
+          const r = (cls.gradebook||{})[s.id] || {};
+          const hs1 = r.hs1 || [];
+          const c = computeGradebookAvg(r);
+          return `<tr class="ledger">
+            <td class="mono">${i+1}</td>
+            <td><b>${esc(s.name)}</b></td>
+            ${[0,1,2,3].map(k=>`<td style="text-align:center;">${inp(s.id,'hs1',k,hs1[k])}</td>`).join('')}
+            <td style="text-align:center;">${inp(s.id,'oral',0,r.oral)}</td>
+            <td style="text-align:center;">${inp(s.id,'hs2',0,r.hs2)}</td>
+            <td style="text-align:center;">${inp(s.id,'hs3',0,r.hs3)}</td>
+            <td class="mono" style="text-align:center;font-weight:700;${gbAvgStyle(c.avg)}${c.avg!==null && !c.complete ? 'opacity:.6;' : ''}" data-gb-avg="${s.id}" title="${c.avg===null ? '' : (c.complete ? 'Đủ cột điểm' : 'Tạm tính — chưa đủ cột điểm') + (c.usedOral ? ' · đã dùng điểm miệng bù HS1' : '')}">${c.avg!==null ? c.avg.toFixed(1) : '—'}</td>
+          </tr>`;
+        }).join('')}
+        </tbody>
+        <tfoot>
+          <tr style="background:var(--surface-alt);font-weight:700;">
+            <td></td><td>Điểm trung bình</td>
+            ${['hs1_0','hs1_1','hs1_2','hs1_3','oral','hs2','hs3'].map(k=>`<td class="mono" style="text-align:center;" data-gb-foot="${k}">${fv(k)}</td>`).join('')}
+            <td class="mono" style="text-align:center;color:var(--accent-deep);" data-gb-foot="avg">${fv('avg')}</td>
+          </tr>
+        </tfoot>
+      </table>
+      </div>` : `<div class="empty"><h3>Lớp chưa có học sinh</h3></div>`}
     </div>
   `;
 }
@@ -4930,6 +5066,26 @@ function attachHandlers(){
     });
   });
 
+  // Sổ điểm: cập nhật ĐTB ngay khi gõ + Enter nhảy xuống ô cùng cột
+  app.querySelectorAll('.gb-input').forEach(inp=>{
+    inp.addEventListener('input', ()=>{
+      const cls = getClass(inp.dataset.class);
+      if(!cls) return;
+      const r = gbRecord(cls, inp.dataset.student);
+      const val = inp.value==='' ? null : clamp(Number(inp.value),0,10);
+      if(inp.dataset.key==='hs1') r.hs1[Number(inp.dataset.idx)||0] = val;
+      else r[inp.dataset.key] = val;
+      updateGradebookDom(cls.id);
+    });
+    inp.addEventListener('keydown', (e)=>{
+      if(e.key!=='Enter') return;
+      e.preventDefault();
+      const all = Array.from(app.querySelectorAll('.gb-input[data-col="'+inp.dataset.col+'"]'));
+      const next = all[all.indexOf(inp)+1];
+      if(next){ next.focus(); if(next.select) next.select(); } else { inp.blur(); }
+    });
+  });
+
   const exModeSel = app.querySelector('#new-exercise-mode');
   const exTotalInput = app.querySelector('#new-exercise-total');
   if(exModeSel && exTotalInput){
@@ -5194,6 +5350,29 @@ async function handleAction(action, elx, e){
       break;
     }
     case 'select-class': state.currentClassId = elx.dataset.id; render(); break;
+    case 'toggle-gradebook': {
+      const c = getClass(elx.dataset.id);
+      if(!c) break;
+      c.hasGradebook = !c.hasGradebook;
+      saveClasses();
+      render();
+      showToast(c.hasGradebook ? 'Đã bật sổ điểm cho '+c.name+' — xem ở tab Sổ điểm.' : 'Đã tắt sổ điểm của '+c.name+' (điểm đã nhập vẫn được giữ).');
+      break;
+    }
+    case 'gradebook-change-class': state.gradebook.classId = elx.value; render(); break;
+    case 'set-grade': {
+      const cls = getClass(elx.dataset.class);
+      if(!cls) break;
+      const r = gbRecord(cls, elx.dataset.student);
+      const raw = elx.value;
+      const val = raw==='' ? null : Math.round(clamp(Number(raw),0,10)*10)/10;
+      const key = elx.dataset.key;
+      if(key==='hs1') r.hs1[Number(elx.dataset.idx)||0] = val;
+      else if(key==='oral' || key==='hs2' || key==='hs3') r[key] = val;
+      saveClasses();
+      updateGradebookDom(cls.id);
+      break;
+    }
     case 'add-student': {
       const c = getClass(state.currentClassId);
       openPromptModal('Thêm học sinh', '', (text)=>{
