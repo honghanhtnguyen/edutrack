@@ -192,6 +192,10 @@
   .grid-2{ display:grid; grid-template-columns:1fr 1fr; gap:18px; }
   .grid-3{ display:grid; grid-template-columns:repeat(3,1fr); gap:14px; }
   .grid-4{ display:grid; grid-template-columns:repeat(4,1fr); gap:14px; }
+  .pie-grid{ display:grid; grid-template-columns:repeat(5,minmax(0,1fr)); gap:12px; }
+  .pie-cell{ display:flex; flex-direction:column; align-items:center; text-align:center; padding:12px 8px; }
+  @media (max-width:1100px){ .pie-grid{ grid-template-columns:repeat(3,minmax(0,1fr)); } }
+  @media (max-width:640px){ .pie-grid{ grid-template-columns:repeat(2,minmax(0,1fr)); } }
   .stat-box{ background:var(--surface-alt); border-radius:8px; padding:12px 14px; }
   .stat-num{ font-family:'IBM Plex Mono',monospace; font-size:25.5px; font-weight:600; }
   .stat-label{ font-size:13px; color:var(--ink-soft); text-transform:uppercase; letter-spacing:.03em; margin-top:2px;}
@@ -2114,19 +2118,8 @@ function renderClassReportBody(classId){
     <div style="margin-bottom:18px;">${chartSvg}</div>
 
     ${validAvgs.length ? (() => {
-      const distBuckets = [
-        {label:'Giỏi (≥8)', value:0, color:'var(--success)'},
-        {label:'Khá (6.5–7.9)', value:0, color:'var(--accent-deep)'},
-        {label:'Trung bình (5–6.4)', value:0, color:'var(--late)'},
-        {label:'Yếu (<5)', value:0, color:'var(--danger)'},
-      ];
-      validAvgs.forEach(v=>{
-        if(v>=8) distBuckets[0].value++;
-        else if(v>=6.5) distBuckets[1].value++;
-        else if(v>=5) distBuckets[2].value++;
-        else distBuckets[3].value++;
-      });
-      return `<h3 style="font-size:16.5px;margin-bottom:10px;">🥧 Phân bố học lực theo điểm trung bình</h3>
+      const distBuckets = gradeBuckets(validAvgs);
+      return `<h3 style="font-size:16.5px;margin-bottom:10px;">🥧 Phân bố học lực theo điểm trung bình <span class="tiny">(Giỏi ≥8 · Khá 6,5–7,9 · TB 5–6,4 · Yếu &lt;5)</span></h3>
       <div style="margin-bottom:18px;">${pieChartWithLegend(distBuckets)}</div>`;
     })() : ''}
 
@@ -2888,10 +2881,13 @@ function renderHomeroom(){
     <button class="${section==='exams'?'on':''}" data-action="homeroom-set-section" data-section="exams">📊 Điểm KT tháng</button>
     <button class="${section==='duties'?'on':''}" data-action="homeroom-set-section" data-section="duties">🧹 Trực nhật & Nhiệm vụ</button>
     <button class="${section==='seating'?'on':''}" data-action="homeroom-set-section" data-section="seating">🪑 Chỗ ngồi</button>
+    <button class="${section==='reminder'?'on':''}" data-action="homeroom-set-section" data-section="reminder">🔔 Nhắc lịch hằng ngày</button>
   </div>`;
 
   let body;
-  if(!cls.students.length){
+  if(section==='reminder'){
+    body = renderReminderSection();
+  } else if(!cls.students.length){
     body = `<div class="card empty"><h3>Lớp chưa có học sinh</h3></div>`;
   } else if(section==='exams'){
     body = renderExamsSection(classId, cls);
@@ -2918,6 +2914,74 @@ function renderHomeroom(){
     </div>
     ${tabs}
     ${body}
+  `;
+}
+
+/* ---- Nhắc lịch hằng ngày (thông báo GVCN gửi phụ huynh qua Zalo) ---- */
+function localISO(){
+  const d = new Date();
+  return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+}
+function reminderHeaderLine(dateISO){
+  const [y,m,d] = dateISO.split('-').map(Number);
+  const dow = new Date(y, m-1, d).getDay();
+  const names = ['Chủ nhật','Thứ Hai','Thứ Ba','Thứ Tư','Thứ Năm','Thứ Sáu','Thứ Bảy'];
+  const dd = String(d).padStart(2,'0'), mm = String(m).padStart(2,'0');
+  return `#${dd}${mm} GVCN gửi các bố/mẹ và các con thông báo ${names[dow]} ngày ${dd}/${mm}/${y}`;
+}
+function buildDailyReminderPrompt(dateISO, raw){
+  const L = [];
+  L.push('Bạn là trợ lý của giáo viên chủ nhiệm (GVCN). Hãy biến TIN NHẮN THÔ bên dưới thành thông báo hằng ngày gửi phụ huynh qua Zalo. Tin thô có thể viết tắt, thiếu dấu, sai chính tả hoặc diễn đạt lộn xộn.');
+  L.push('');
+  L.push('QUY TẮC XỬ LÝ:');
+  L.push('1. Sửa chính tả, thêm dấu, viết lại rõ ràng và lịch sự; chỉ giải nghĩa viết tắt khi chắc chắn.');
+  L.push('2. Giữ nguyên thông tin, tên riêng, số bài, số trang và thời hạn. Tuyệt đối không tự thêm bài tập hoặc nhận xét.');
+  L.push('3. Gộp thông tin cùng môn; chỉ hiển thị môn có dữ liệu. Phân biệt rõ BTVN với nội dung học và lời nhắc (nội dung học không ghi vào BTVN).');
+  L.push('4. Chỗ nào chưa rõ thì ghi "[cần xác nhận: …]", không đoán.');
+  L.push('5. Ngày và thứ đã được tính sẵn — dùng đúng dòng tiêu đề bên dưới, không tự đổi.');
+  L.push('6. Thông báo chung của lớp/trường, nhắc lịch, sự kiện, việc cần nộp (VD: nộp kế hoạch nhỏ…) không thuộc môn nào thì đưa vào mục "📌 Thông báo".');
+  L.push('7. CHỈ xuất thông báo hoàn chỉnh, không kèm lời giải thích hay lời dẫn. Dùng xuống dòng và emoji; KHÔNG dùng ký hiệu Markdown (không **, không #, không * hay - đầu dòng). Dùng "•" cho các gạch đầu dòng.');
+  L.push('');
+  L.push('MẪU ĐẦU RA (bỏ các dòng không có dữ liệu):');
+  L.push(reminderHeaderLine(dateISO));
+  L.push('🏡 GVCN cập nhật bài tập các con cần hoàn thành. Kính nhờ các bố/mẹ vui lòng đôn đốc và kiểm tra bài tập của các con.');
+  L.push('📚 [Tên môn]');
+  L.push('• BTVN: [Nội dung ngắn gọn]');
+  L.push('• Lưu ý: [Chỉ thêm khi có trong dữ liệu]');
+  L.push('(Lặp lại khối 📚 cho từng môn có thông tin. Nếu có thông báo chung thì thêm mục "📌 Thông báo".)');
+  L.push('Các bố/mẹ nhấn like xác nhận tin giúp cô. Trân trọng! @All');
+  L.push('');
+  L.push('=== TIN NHẮN THÔ ===');
+  L.push(raw.trim());
+  return L.join('\n');
+}
+function renderReminderSection(){
+  const h = state.homeroom;
+  const date = h.reminderDate || localISO();
+  return `
+    <div class="card">
+      <div class="card-title">🔔 Nhắc lịch hằng ngày gửi phụ huynh</div>
+      <div class="muted" style="margin-bottom:12px;">Dán tin ghi chép thô (viết tắt, thiếu dấu đều được) → tạo prompt → dán vào ChatGPT để ra thông báo hoàn chỉnh gửi Zalo. Có thể dùng cho cả nhắc lịch/sự kiện (nộp kế hoạch nhỏ...).</div>
+      <div style="display:flex; gap:16px; flex-wrap:wrap; align-items:flex-end; margin-bottom:12px;">
+        <div><label class="field-label">Ngày thông báo</label><input type="date" value="${date}" data-action="reminder-change-date"></div>
+        <div class="mono" style="font-weight:700; color:var(--accent-deep);">${esc(reminderHeaderLine(date))}</div>
+      </div>
+      <label class="field-label">Tin nhắn thô</label>
+      <textarea id="reminder-raw" rows="9" placeholder="VD: toan: lam bt 5,6 trang 12. van: hoc thuoc bai tho. mai nop kh nho..." data-action="reminder-set-raw">${esc(h.reminderRaw||'')}</textarea>
+      <div style="text-align:right; margin-top:10px; display:flex; gap:8px; justify-content:flex-end;">
+        <button class="btn btn-outline btn-sm" data-action="reminder-clear">Xoá hết</button>
+        <button class="btn btn-accent" data-action="generate-reminder-prompt">✨ Tạo prompt</button>
+      </div>
+    </div>
+
+    ${h.reminderPrompt ? `
+    <div class="card">
+      <div class="card-title">
+        <span>📝 Prompt gửi ChatGPT</span>
+        <button class="btn btn-outline btn-sm" data-action="copy-reminder-prompt">💬 Sao chép prompt</button>
+      </div>
+      <textarea id="reminder-prompt-text" rows="12">${esc(h.reminderPrompt)}</textarea>
+    </div>` : ''}
   `;
 }
 
@@ -3039,6 +3103,30 @@ function renderExamsSection(classId, cls){
   });
   const alarmingSubjects = subjectStats.filter(s=>s.avg!==null && s.avg<5);
 
+  // Tỉ lệ Giỏi/Khá/TB/Yếu: từng môn + tổng (gộp mọi điểm của các môn, mỗi điểm 1 lượt)
+  const subjectScores = {};
+  EXAM_SUBJECTS.forEach(([k])=>{
+    subjectScores[k] = cls.students.map(s=>{ const v=(monthData[s.id]||{})[k]; return (v!==undefined && v!==null && v!=='') ? Number(v) : null; }).filter(v=>v!==null);
+  });
+  const allScores = [].concat(...EXAM_SUBJECTS.map(([k])=>subjectScores[k]));
+  const gradePieBlock = allScores.length ? `
+      <h3 style="font-size:16.5px;margin-bottom:4px;">🥧 Tỉ lệ học lực Giỏi / Khá / TB / Yếu</h3>
+      <div class="tiny" style="margin-bottom:12px;">Giỏi ≥ 8 · Khá 6,5–7,9 · TB 5–6,4 · Yếu &lt; 5. “Tổng các môn” gộp tất cả điểm của 4 môn (mỗi điểm tính 1 lượt).</div>
+      <div class="pie-grid" style="margin-bottom:12px;">
+        ${[['total','Tổng các môn',allScores]].concat(EXAM_SUBJECTS.map(([k,label])=>[k,label,subjectScores[k]])).map(([k,label,vals])=>`
+        <div class="stat-box pie-cell" style="${k==='total' ? 'border:2px solid var(--accent);' : ''}">
+          <div style="font-weight:700; margin-bottom:2px;">${esc(label)}</div>
+          <div class="tiny" style="margin-bottom:8px;">${vals.length} điểm${k!=='total' && vals.length ? ' · TB ' + (vals.reduce((a,b)=>a+b,0)/vals.length).toFixed(1) : ''}</div>
+          ${vals.length ? pieChartWithLegend(gradeBuckets(vals), {size:120, stack:true, pctFirst:true}) : `<div class="muted" style="padding:44px 0;">Chưa có điểm</div>`}
+        </div>`).join('')}
+      </div>
+      ${(() => {
+        const ranked = subjectStats.filter(s=>s.avg!==null).sort((a,b)=>b.avg-a.avg);
+        if(ranked.length<2) return '';
+        const medals = ['🥇','🥈','🥉','4️⃣'];
+        return `<div class="tiny" style="margin-bottom:20px;">Xếp hạng môn theo điểm TB lớp: ${ranked.map((s,i)=>`${medals[i]||''} <b>${esc(s.label)}</b> ${s.avg.toFixed(1)}`).join(' &nbsp;·&nbsp; ')}</div>`;
+      })()}` : '';
+
   return `
     <div class="card" style="display:flex; gap:16px; align-items:flex-end; flex-wrap:wrap;">
       <div><label class="field-label">Tháng kiểm tra</label><input type="month" value="${month}" data-action="exam-change-month"></div>
@@ -3058,6 +3146,8 @@ function renderExamsSection(classId, cls){
     <div class="card">
       <div class="card-title">📊 Phân tích tháng ${monthLabel(month)}</div>
 
+      ${gradePieBlock}
+
       ${alarmingSubjects.length? `
       <div class="warn-banner" style="margin-bottom:14px;">
         <div class="dot"></div>
@@ -3067,16 +3157,41 @@ function renderExamsSection(classId, cls){
         </div>
       </div>` : (subjectStats.some(s=>s.avg!==null) ? `<div class="muted" style="margin-bottom:14px;">✓ Không có môn nào ở mức báo động (TB lớp trên 5).</div>` : '')}
 
-      <div class="grid-2" style="margin-bottom:16px;">
+      ${(() => {
+        // Xếp hạng học sinh: Tổng (điểm TB tháng) + từng môn. Điểm bằng nhau thì cùng hạng.
+        const rankKeys = [['total','Tổng']].concat(EXAM_SUBJECTS);
+        const rankKey = rankKeys.some(([k])=>k===state.homeroom.examRankKey) ? state.homeroom.examRankKey : 'total';
+        const rankLabel = rankKeys.find(([k])=>k===rankKey)[1];
+        const base = rankKey==='total'
+          ? rows.filter(r=>r.avg!==null).map(r=>({name:r.name, score:r.avg}))
+          : cls.students.map(s=>{ const v=(monthData[s.id]||{})[rankKey]; return (v!==undefined && v!==null && v!=='') ? {name:s.name, score:Number(v)} : null; }).filter(Boolean);
+        const sorted = base.slice().sort((a,b)=>b.score-a.score);
+        let prevScore = null, rk = 0;
+        const ranked = sorted.map((x,i)=>{ if(prevScore===null || x.score!==prevScore){ rk = i+1; prevScore = x.score; } return {...x, rank: rk}; });
+        const medals = ['🥇','🥈','🥉'];
+        const top = ranked.slice(0,5);
+        const bottom = ranked.slice(-5).reverse();
+        const tabs = rankKeys.map(([k,label])=>`<button class="${k===rankKey?'on':''}" data-action="exam-set-rank" data-key="${k}">${esc(label)}</button>`).join('');
+        const rowHtml = (r, cls_) => `<tr class="ledger ${cls_}"><td class="mono" style="width:44px;">${medals[r.rank-1] && cls_==='' ? medals[r.rank-1] : '#'+r.rank}</td><td>${esc(r.name)}</td><td class="mono" style="text-align:right;">${r.score.toFixed(1)}</td></tr>`;
+        return `
+      <h3 style="font-size:16.5px;margin-bottom:8px;">🏅 Xếp hạng học sinh</h3>
+      <div class="tabs-sub" style="margin-bottom:10px;">${tabs}</div>
+      ${ranked.length ? `
+      <div class="grid-2" style="margin-bottom:8px;">
         <div>
-          <h3 style="font-size:16.5px;margin-bottom:8px;">🏆 Top 5 điểm cao nhất</h3>
-          ${top5High.length? `<table><tbody>${top5High.map((r,i)=>`<tr class="ledger"><td class="mono">${i+1}</td><td>${esc(r.name)}</td><td class="mono">${r.avg.toFixed(1)}</td></tr>`).join('')}</tbody></table>` : `<div class="muted">Chưa đủ dữ liệu.</div>`}
+          <div style="font-weight:700; margin-bottom:6px;">🏆 Top 5 cao nhất — ${esc(rankLabel)}</div>
+          <table><tbody>${top.map(r=>rowHtml(r,'')).join('')}</tbody></table>
         </div>
         <div>
-          <h3 style="font-size:16.5px;margin-bottom:8px;">📉 Top 5 điểm thấp nhất</h3>
-          ${top5Low.length? `<table><tbody>${top5Low.map((r,i)=>`<tr class="ledger flagged"><td class="mono">${i+1}</td><td>${esc(r.name)}</td><td class="mono">${r.avg.toFixed(1)}</td></tr>`).join('')}</tbody></table>` : `<div class="muted">Chưa đủ dữ liệu.</div>`}
+          <div style="font-weight:700; margin-bottom:6px;">📉 Top 5 thấp nhất — ${esc(rankLabel)}</div>
+          <table><tbody>${bottom.map(r=>rowHtml(r,'flagged')).join('')}</tbody></table>
         </div>
       </div>
+      <details style="margin-bottom:16px;">
+        <summary style="cursor:pointer; font-weight:600; color:var(--accent-deep);">Xem toàn bộ bảng xếp hạng ${esc(rankLabel)} (${ranked.length} em)</summary>
+        <table style="margin-top:8px;"><tbody>${ranked.map(r=>rowHtml(r,'')).join('')}</tbody></table>
+      </details>` : `<div class="muted" style="margin-bottom:16px;">Chưa đủ dữ liệu.</div>`}`;
+      })()}
 
       <div class="grid-2">
         <div>
@@ -4637,10 +4752,10 @@ function lineChartSVG(labels, series){
   return `<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto;max-height:260px;">${gridLines.join('')}${lines}${xLabels}</svg>`;
 }
 
-function pieChartSVG(data){
+function pieChartSVG(data, px){
   const size = 160, r = 70, cx = 80, cy = 80;
   const total = data.reduce((a,b)=>a+b.value,0);
-  if(!total) return `<svg viewBox="0 0 ${size} ${size}" style="width:140px;height:140px;flex-shrink:0;"><circle cx="${cx}" cy="${cy}" r="${r}" fill="#EFEAE0"/></svg>`;
+  if(!total) return `<svg viewBox="0 0 ${size} ${size}" style="width:${px||140}px;height:${px||140}px;flex-shrink:0;"><circle cx="${cx}" cy="${cy}" r="${r}" fill="#EFEAE0"/></svg>`;
   const toRad = a => (a*Math.PI/180);
   let angle = -90;
   const parts = data.filter(d=>d.value>0).map(d=>{
@@ -4659,7 +4774,7 @@ function pieChartSVG(data){
     const y2 = cy + r*Math.sin(toRad(endAngle));
     return `<path d="M${cx},${cy} L${x1.toFixed(2)},${y1.toFixed(2)} A${r},${r} 0 ${large} 1 ${x2.toFixed(2)},${y2.toFixed(2)} Z" fill="${color}" stroke="#fff" stroke-width="1.5"/>`;
   }).join('');
-  return `<svg viewBox="0 0 ${size} ${size}" style="width:140px;height:140px;flex-shrink:0;">${parts}</svg>`;
+  return `<svg viewBox="0 0 ${size} ${size}" style="width:${px||140}px;height:${px||140}px;flex-shrink:0;">${parts}</svg>`;
 }
 function progressRingSVG(percent, opts){
   opts = opts || {};
@@ -4685,20 +4800,41 @@ function progressRingSVG(percent, opts){
     </div>
   </div>`;
 }
-function pieChartWithLegend(data){
+// opts: {size: px của biểu đồ, stack: true = chú thích nằm dưới biểu đồ, pctFirst: true = in đậm % trước, số lượng trong ngoặc}
+function pieChartWithLegend(data, opts){
+  opts = opts || {};
   const total = data.reduce((a,b)=>a+b.value,0);
-  const svg = pieChartSVG(data);
+  const svg = pieChartSVG(data, opts.size);
   const legend = data.map(d=>{
     const pct = total? Math.round(d.value/total*100) : 0;
-    return `<div style="display:flex;align-items:center;gap:7px;margin-bottom:6px;">
+    const txt = opts.pctFirst
+      ? `${esc(d.label)}: <strong>${pct}%</strong> <span style="color:var(--ink-faint);">(${d.value})</span>`
+      : `${esc(d.label)}: <strong>${d.value}</strong>${total? ` (${pct}%)` : ''}`;
+    return `<div style="display:flex;align-items:center;gap:7px;margin-bottom:5px;">
       <span style="width:11px;height:11px;border-radius:3px;background:${resolveVar(d.color)};display:inline-block;flex-shrink:0;"></span>
-      <span style="font-size:13.5px;">${esc(d.label)}: <strong>${d.value}</strong>${total? ` (${pct}%)` : ''}</span>
+      <span style="font-size:13.5px;">${txt}</span>
     </div>`;
   }).join('');
-  return `<div style="display:flex; align-items:center; gap:18px; flex-wrap:wrap;">
+  return `<div style="display:flex; ${opts.stack ? 'flex-direction:column; align-items:center;' : 'align-items:center; flex-wrap:wrap;'} gap:${opts.stack ? 10 : 18}px;">
     ${svg}
     <div>${legend}</div>
   </div>`;
+}
+// Phân loại học lực theo thang 10: Giỏi ≥8 · Khá 6,5–<8 · TB 5–<6,5 · Yếu <5
+function gradeBuckets(values){
+  const b = [
+    {label:'Giỏi', value:0, color:'#41BFB6'},
+    {label:'Khá', value:0, color:'#5B8DEF'},
+    {label:'TB', value:0, color:'#F2A93B'},
+    {label:'Yếu', value:0, color:'#DC2626'},
+  ];
+  values.forEach(v=>{
+    if(v>=8) b[0].value++;
+    else if(v>=6.5) b[1].value++;
+    else if(v>=5) b[2].value++;
+    else b[3].value++;
+  });
+  return b;
 }
 
 /* ============================================================
@@ -5350,6 +5486,29 @@ async function handleAction(action, elx, e){
       break;
     }
     case 'select-class': state.currentClassId = elx.dataset.id; render(); break;
+    case 'reminder-change-date': state.homeroom.reminderDate = elx.value || localISO(); render(); break;
+    case 'reminder-set-raw': state.homeroom.reminderRaw = elx.value; break;
+    case 'reminder-clear': {
+      state.homeroom.reminderRaw = ''; state.homeroom.reminderPrompt = '';
+      render();
+      break;
+    }
+    case 'generate-reminder-prompt': {
+      const rawEl = document.getElementById('reminder-raw');
+      const raw = rawEl ? rawEl.value : (state.homeroom.reminderRaw||'');
+      state.homeroom.reminderRaw = raw;
+      if(!raw.trim()){ showToast('Dán tin nhắn thô vào trước nhé.'); break; }
+      state.homeroom.reminderPrompt = buildDailyReminderPrompt(state.homeroom.reminderDate || localISO(), raw);
+      render();
+      break;
+    }
+    case 'copy-reminder-prompt': {
+      const el = document.getElementById('reminder-prompt-text');
+      copyTextToClipboard(el ? el.value : state.homeroom.reminderPrompt).then(ok=>{
+        showToast(ok ? 'Đã copy prompt — dán vào ChatGPT.' : 'Không copy được, cô bôi đen (Ctrl+A) rồi Ctrl+C nhé.', 3200);
+      });
+      break;
+    }
     case 'toggle-gradebook': {
       const c = getClass(elx.dataset.id);
       if(!c) break;
@@ -5756,6 +5915,7 @@ async function handleAction(action, elx, e){
     case 'export-conduct': exportConductExcel(elx.dataset.class, elx.dataset.month); break;
 
     /* ---- Điểm kiểm tra tháng ---- */
+    case 'exam-set-rank': state.homeroom.examRankKey = elx.dataset.key; render(); break;
     case 'exam-change-month': state.homeroom.examMonth = elx.value; state.homeroom.examPrompt=''; render(); break;
     case 'set-exam-score': {
       const classId = elx.dataset.class, month = elx.dataset.month, studentId = elx.dataset.student, subject = elx.dataset.subject;
