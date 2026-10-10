@@ -1051,6 +1051,8 @@ function getTodaySuggestions(){
     suggestions.push({id:'monday-teams', icon:'🏁', title:'Đầu tuần — cộng điểm thi đua tổ/nhóm', detail:'Tổng kết điểm thi đua tuần trước cho các tổ.', tab:'homeroom', section:'teams'});
   }
 
+  // Chưa có lớp chủ nhiệm thì không nhắc các việc của tab Chủ nhiệm
+  if(!state.classes.some(isHomeroomClass)) return suggestions.filter(s=>s.tab!=='homeroom');
   return suggestions;
 }
 
@@ -1349,9 +1351,10 @@ function renderClasses(){
           <div style="display:flex;align-items:center;justify-content:space-between;padding:9px 0;border-bottom:1px solid var(--line);">
             <div style="cursor:pointer;flex:1;" data-action="select-class" data-id="${c.id}">
               <div style="font-weight:600; ${c.id===state.currentClassId?'color:var(--accent-deep);':''}">${esc(c.name)}</div>
-              <div class="tiny">${c.students.length} học sinh${c.hasGradebook ? ' · 📒 có sổ điểm' : ''}</div>
+              <div class="tiny">${c.students.length} học sinh${isHomeroomClass(c) ? ' · 🎓 chủ nhiệm' : ''}${c.hasGradebook ? ' · 📒 có sổ điểm' : ''}</div>
             </div>
-            <button class="btn ${c.hasGradebook?'btn-accent':'btn-outline'} btn-sm" title="Bật/tắt sổ điểm riêng cho lớp này" data-action="toggle-gradebook" data-id="${c.id}">📒 ${c.hasGradebook?'Sổ điểm: Bật':'Bật sổ điểm'}</button>
+            <button class="btn ${isHomeroomClass(c)?'btn-accent':'btn-outline'} btn-sm" title="Bật = đây là lớp chủ nhiệm, được dùng tab Chủ nhiệm" data-action="toggle-homeroom" data-id="${c.id}">🎓 Chủ nhiệm</button>
+            <button class="btn ${c.hasGradebook?'btn-accent':'btn-outline'} btn-sm" title="Bật = lớp này có sổ điểm riêng" data-action="toggle-gradebook" data-id="${c.id}">📒 Sổ điểm</button>
             <button class="btn btn-outline btn-sm" data-action="rename-class" data-id="${c.id}">Sửa tên</button>
             <button class="btn btn-danger-outline btn-sm" data-action="delete-class" data-id="${c.id}">Xoá</button>
           </div>
@@ -1385,6 +1388,17 @@ function renderClasses(){
    SỔ ĐIỂM (chỉ lớp được bật hasGradebook)
    ĐTB = (tổng 4 bài HS1 + 2×HS2 + 3×HS3) / 9. Điểm miệng là điểm dự phòng: bù vào ô HS1 còn trống.
 ============================================================ */
+// Lớp chủ nhiệm: chỉ lớp được bật mới dùng được tab Chủ nhiệm.
+// Lớp chưa từng bật/tắt mà đã có dữ liệu chủ nhiệm cũ thì tự coi là lớp chủ nhiệm (không làm mất dữ liệu đang dùng).
+function hasHomeroomData(c){
+  return !!((c.teams && c.teams.length) || (c.teamScores && c.teamScores.length) ||
+    (c.monthlyExams && Object.keys(c.monthlyExams).length) || (c.conduct && Object.keys(c.conduct).length) ||
+    (c.students||[]).some(s=> (s.violations && s.violations.length) || (s.activities && s.activities.length)));
+}
+function isHomeroomClass(c){
+  if(!c) return false;
+  return (c.isHomeroom===undefined) ? hasHomeroomData(c) : !!c.isHomeroom;
+}
 function gbParse(v){
   if(v===null || v===undefined || v==='') return null;
   const n = Number(v);
@@ -2868,9 +2882,16 @@ function conductSuggestion(classId, monthKey_, studentId){
 
 function renderHomeroom(){
   if(!state.classes.length) return `<div class="topbar"><h1 class="page-title">Công tác chủ nhiệm</h1></div><div class="card empty"><h3>Chưa có lớp học</h3></div>`;
-  const classId = state.homeroom.classId || state.currentClassId;
+  const hrClasses = state.classes.filter(isHomeroomClass);
+  if(!hrClasses.length){
+    return `<div class="topbar"><div><h1 class="page-title">Công tác chủ nhiệm</h1>${chalkUnderline()}</div></div>
+      <div class="card empty"><h3>Chưa có lớp chủ nhiệm</h3><div class="muted">Vào tab "Lớp học" → bấm "🎓 Chủ nhiệm" ở lớp mình chủ nhiệm để bật tab này cho lớp đó.</div></div>`;
+  }
+  let classId = state.homeroom.classId || state.currentClassId;
+  if(!hrClasses.some(c=>c.id===classId)) classId = hrClasses[0].id;
+  state.homeroom.classId = classId;
   const cls = getClass(classId);
-  const classOptions = state.classes.map(c=>`<option value="${c.id}" ${c.id===classId?'selected':''}>${esc(c.name)}</option>`).join('');
+  const classOptions = hrClasses.map(c=>`<option value="${c.id}" ${c.id===classId?'selected':''}>${esc(c.name)}</option>`).join('');
   const section = state.homeroom.section || 'conduct';
 
   const tabs = `<div class="tabs-sub">
@@ -5507,6 +5528,15 @@ async function handleAction(action, elx, e){
       copyTextToClipboard(el ? el.value : state.homeroom.reminderPrompt).then(ok=>{
         showToast(ok ? 'Đã copy prompt — dán vào ChatGPT.' : 'Không copy được, cô bôi đen (Ctrl+A) rồi Ctrl+C nhé.', 3200);
       });
+      break;
+    }
+    case 'toggle-homeroom': {
+      const c = getClass(elx.dataset.id);
+      if(!c) break;
+      c.isHomeroom = !isHomeroomClass(c);
+      saveClasses();
+      render();
+      showToast(c.isHomeroom ? c.name+' là lớp chủ nhiệm — dùng ở tab Chủ nhiệm.' : 'Đã tắt chủ nhiệm cho '+c.name+' (dữ liệu vẫn được giữ).');
       break;
     }
     case 'toggle-gradebook': {
