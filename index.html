@@ -1374,6 +1374,7 @@ function renderClasses(){
                 <td>${esc(s.name)}</td>
                 <td style="text-align:right;">
                   <button class="btn btn-outline btn-sm" data-action="rename-student" data-id="${s.id}">Sửa</button>
+                  <button class="btn btn-outline btn-sm" title="Nghỉ học/chuyển lớp: ẩn khỏi lớp nhưng vẫn giữ toàn bộ dữ liệu" data-action="archive-student" data-id="${s.id}">🗄️ Lưu trữ</button>
                   <button class="btn btn-danger-outline btn-sm" data-action="delete-student" data-id="${s.id}">Xoá</button>
                 </td>
               </tr>`).join('')}
@@ -1381,7 +1382,39 @@ function renderClasses(){
         }
       </div>
     </div>
+    ${cur ? renderArchivedStudents(cur) : ''}
   `;
+}
+
+function renderArchivedStudents(cls){
+  const list = cls.archivedStudents || [];
+  return `
+    <div class="card" style="margin-top:14px;">
+      <div class="card-title">🗄️ Lưu trữ — ${esc(cls.name)} <span class="tiny">(${list.length} học sinh)</span></div>
+      <div class="muted" style="margin-bottom:10px;">Học sinh đã nghỉ/chuyển lớp: không còn xuất hiện trong lớp, báo cáo và các tab khác, nhưng toàn bộ điểm danh, điểm số, vi phạm vẫn được giữ. Khôi phục bất cứ lúc nào.</div>
+      ${list.length ? `
+      <div style="overflow-x:auto;">
+      <table><thead><tr><th>Họ tên</th><th>Ngày lưu trữ</th><th>Lý do</th><th style="text-align:center;">Chuyên cần</th><th style="text-align:center;">Điểm TB</th><th style="text-align:center;">Vi phạm</th><th></th></tr></thead><tbody>
+      ${list.map(s=>{
+        const att = studentAttendanceStats(cls.id, s.id);
+        const series = studentScoreSeries(cls.id, s.id);
+        const avg = series.length ? series.reduce((a,b)=>a+b.score,0)/series.length : null;
+        return `<tr class="ledger">
+          <td><b>${esc(s.name)}</b></td>
+          <td class="mono">${s.archivedAt ? fmtDateVN(s.archivedAt) : '—'}</td>
+          <td class="note-text">${esc(s.archiveReason||'')}</td>
+          <td class="mono" style="text-align:center;">${att.rate!==null ? att.rate+'%' : '—'}</td>
+          <td class="mono" style="text-align:center;">${avg!==null ? avg.toFixed(1) : '—'}</td>
+          <td class="mono" style="text-align:center;">${(s.violations||[]).length}</td>
+          <td style="text-align:right;white-space:nowrap;">
+            <button class="btn btn-outline btn-sm" data-action="restore-student" data-id="${s.id}">↩ Khôi phục</button>
+            <button class="btn btn-danger-outline btn-sm" data-action="delete-archived-student" data-id="${s.id}">Xoá hẳn</button>
+          </td>
+        </tr>`;
+      }).join('')}
+      </tbody></table>
+      </div>` : `<div class="muted">Chưa có học sinh nào được lưu trữ.</div>`}
+    </div>`;
 }
 
 /* ============================================================
@@ -5585,6 +5618,45 @@ async function handleAction(action, elx, e){
       const s = c.students.find(x=>x.id===elx.dataset.id);
       openPromptModal('Sửa tên học sinh', s.name, (name)=>{
         if(name && name.trim()){ s.name = name.trim(); saveClasses(); }
+      });
+      break;
+    }
+    case 'archive-student': {
+      const c = getClass(state.currentClassId);
+      const sid = elx.dataset.id;
+      const st = c && c.students.find(x=>x.id===sid);
+      if(!st) break;
+      openPromptModal('Lưu trữ '+st.name+' — lý do (không bắt buộc)', '', (reason)=>{
+        c.students = c.students.filter(x=>x.id!==sid);
+        if(!c.archivedStudents) c.archivedStudents = [];
+        c.archivedStudents.push({...st, archivedAt: localISO(), archiveReason: (reason||'').trim()});
+        if(c.seating && c.seating.assignments){
+          Object.keys(c.seating.assignments).forEach(k=>{ if(c.seating.assignments[k]===sid) delete c.seating.assignments[k]; });
+        }
+        saveClasses();
+        showToast('Đã lưu trữ '+st.name+' — xem ở mục Lưu trữ bên dưới.');
+      }, {placeholder:'VD: Chuyển trường, nghỉ học...', submitLabel:'Lưu trữ', hint:'Điểm danh, điểm số, vi phạm của em vẫn được giữ lại.'});
+      break;
+    }
+    case 'restore-student': {
+      const c = getClass(state.currentClassId);
+      const sid = elx.dataset.id;
+      const st = c && (c.archivedStudents||[]).find(x=>x.id===sid);
+      if(!st) break;
+      const {archivedAt, archiveReason, ...rest} = st;
+      c.archivedStudents = c.archivedStudents.filter(x=>x.id!==sid);
+      c.students.push(rest);
+      saveClasses();
+      render();
+      showToast('Đã khôi phục '+st.name+' về lớp.');
+      break;
+    }
+    case 'delete-archived-student': {
+      const c = getClass(state.currentClassId);
+      const sid = elx.dataset.id;
+      openConfirmModal('Xoá hẳn học sinh này khỏi Lưu trữ? Không thể hoàn tác.', true, ()=>{
+        c.archivedStudents = (c.archivedStudents||[]).filter(x=>x.id!==sid);
+        saveClasses();
       });
       break;
     }
