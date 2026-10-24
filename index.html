@@ -38,7 +38,7 @@
   *{box-sizing:border-box;}
   html,body{margin:0;padding:0;}
   body{
-    background:var(--bg);
+    background:linear-gradient(160deg,#F4FBFA 0%,#E9F6F4 58%,#F5FAF9 100%) fixed;
     color:var(--ink);
     font-family:'Be Vietnam Pro',sans-serif;
     font-weight:500;
@@ -48,34 +48,70 @@
   .mono{ font-family:'IBM Plex Mono',monospace; }
   #app{ display:flex; min-height:100vh; }
 
-  /* ---------- Sidebar ---------- */
+  /* ---------- Sidebar: thanh icon nổi, kéo ra/thu vào ---------- */
+  :root{ --rail:#1D5551; --rail-2:#17423F; --page:#EEF8F6; }
+  .sidebar-wrap{ width:100px; flex-shrink:0; position:relative; }
   .sidebar{
-    width:230px; flex-shrink:0; background:var(--surface-alt); color:var(--ink); border-right:1px solid var(--line);
-    display:flex; flex-direction:column; padding:22px 14px;
+    position:fixed; left:14px; top:14px; bottom:14px; z-index:70; width:72px;
+    background:linear-gradient(175deg,var(--rail) 0%,var(--rail-2) 100%); color:#fff;
+    border-radius:36px; padding:14px 14px 12px; display:flex; flex-direction:column;
+    box-shadow:0 18px 40px rgba(23,66,63,.28), 0 4px 10px rgba(23,66,63,.18);
+    transition:width .28s cubic-bezier(.22,1,.36,1), transform .28s cubic-bezier(.22,1,.36,1), border-radius .28s;
+    --ni:clamp(34px, 4.3vh, 44px);
   }
-  .brand{ display:flex; align-items:center; gap:10px; padding:0 8px 22px 8px; border-bottom:1px solid var(--line); margin-bottom:16px;}
-  .brand-mark{ width:34px;height:34px;border-radius:8px;background:var(--accent); display:flex;align-items:center;justify-content:center; font-family:'Baloo 2',sans-serif; font-weight:700; font-size:22px; color:#fff;}
-  .brand-name{ font-family:'Baloo 2',sans-serif; font-size:22px; font-weight:700; line-height:1.15; color:var(--ink);}
-  .brand-sub{ font-size:12.5px; color:var(--ink-faint); letter-spacing:.04em; text-transform:uppercase; margin-top:2px;}
-  .nav-group-label{ font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:.06em; color:#8C8C8C; padding:14px 12px 6px; }
-  .global-search-wrap{ position:relative; padding:0 4px 6px; }
-  .global-search-wrap input{ width:100%; border:1px solid var(--line); border-radius:9px; padding:9px 12px; font-size:14px; font-family:'Be Vietnam Pro',sans-serif; background:#fff; }
-  .global-search-results{ position:absolute; top:calc(100% - 2px); left:4px; right:4px; background:#fff; border:1px solid var(--line); border-radius:10px; box-shadow:var(--shadow); z-index:80; max-height:340px; overflow-y:auto; }
-  .global-search-item{ display:flex; flex-direction:column; gap:1px; padding:9px 12px; cursor:pointer; border-bottom:1px solid var(--line); font-size:14px; }
+  .sidebar.open{ width:236px; border-radius:30px; }
+  .nav-toggle{
+    position:absolute; right:-13px; top:76px; width:26px; height:26px; border-radius:50%; border:0; cursor:pointer;
+    background:#fff; color:var(--rail); box-shadow:0 2px 8px rgba(23,66,63,.35); display:flex; align-items:center; justify-content:center; padding:0; z-index:2;
+  }
+  .nav-toggle svg{ width:14px; height:14px; transition:transform .28s; }
+  .sidebar.open .nav-toggle svg{ transform:rotate(180deg); }
+  .nav-brand{ display:flex; align-items:center; gap:12px; height:48px; margin:0 auto 10px; width:44px; overflow:hidden; transition:width .28s; }
+  .sidebar.open .nav-brand{ width:100%; }
+  .brand-mark{ flex:none; width:44px; height:44px; border-radius:50%; background:var(--accent); display:flex; align-items:center; justify-content:center; font-family:'Baloo 2',sans-serif; font-weight:800; font-size:25px; color:#fff; box-shadow:0 0 0 3px rgba(255,255,255,.18); }
+  .brand-txt{ line-height:1.15; white-space:nowrap; opacity:0; transition:opacity .2s; }
+  .brand-txt b{ display:block; font-family:'Baloo 2',sans-serif; font-size:21px; }
+  .brand-txt small{ font-size:11.5px; opacity:.65; text-transform:uppercase; letter-spacing:.05em; }
+  .sidebar.open .brand-txt{ opacity:1; transition-delay:.1s; }
+  .nav-scroll{ flex:1; min-height:0; overflow-y:auto; overflow-x:hidden; scrollbar-width:none; margin:0 -14px; padding:0 14px; }
+  .nav-scroll::-webkit-scrollbar{ display:none; }
+  .sidebar.open .nav-scroll{ scrollbar-width:thin; scrollbar-color:rgba(255,255,255,.28) transparent; }
+  .nav-sep{ height:1px; background:rgba(255,255,255,.16); margin:7px 8px; }
+  .nav-sep span{ display:none; }
+  .sidebar.open .nav-sep{ background:none; height:auto; margin:10px 10px 4px; }
+  .sidebar.open .nav-sep span{ display:block; font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:.07em; color:rgba(255,255,255,.5); }
+  .nav-item{
+    position:relative; display:flex; align-items:center; gap:14px; height:var(--ni); width:var(--ni); margin:0 auto 3px; padding:0 0 0 calc((var(--ni) - 22px)/2);
+    border-radius:999px; cursor:pointer; color:rgba(255,255,255,.74); font-family:'Baloo 2',sans-serif; font-size:17.5px; font-weight:600; white-space:nowrap; overflow:hidden;
+    transition:background .15s ease, color .15s ease, width .28s cubic-bezier(.22,1,.36,1), transform .2s;
+  }
+  .sidebar.open .nav-item{ width:100%; }
+  .nav-item:hover{ background:rgba(255,255,255,.13); color:#fff; }
+  .nav-item:active{ transform:scale(.96); }
+  .nav-item.active{ background:#E9FAF7; color:var(--rail); box-shadow:0 0 0 4px var(--rail), 0 4px 12px rgba(0,0,0,.18); }
+  .nav-icon{ flex:none; width:22px; height:22px; display:flex; }
+  .nav-icon svg{ width:22px; height:22px; fill:none; stroke:currentColor; stroke-width:1.9; stroke-linecap:round; stroke-linejoin:round; }
+  .nav-label{ opacity:0; transition:opacity .15s; }
+  .sidebar.open .nav-label{ opacity:1; transition-delay:.12s; }
+  .nav-badge{ position:absolute; top:2px; right:2px; min-width:17px; height:17px; padding:0 4px; background:var(--danger); color:#fff; font-size:10.5px; line-height:17px; text-align:center; border-radius:20px; font-weight:700; font-family:'Be Vietnam Pro',sans-serif; }
+  .sidebar.open .nav-badge{ top:50%; right:14px; transform:translateY(-50%); font-size:12px; height:20px; line-height:20px; min-width:20px; }
+  .nav-search-btn{ margin-bottom:8px; }
+  .sidebar.open .nav-search-btn{ display:none; }
+  .global-search-wrap{ display:none; position:relative; margin-bottom:8px; }
+  .sidebar.open .global-search-wrap{ display:block; }
+  .sidebar .global-search-wrap input{ width:100%; border:0 !important; border-radius:999px; padding:10px 16px; font-size:14.5px; font-family:'Be Vietnam Pro',sans-serif; background:rgba(255,255,255,.14) !important; color:#fff !important; outline:none; box-shadow:none; }
+  .sidebar .global-search-wrap input::placeholder{ color:rgba(255,255,255,.62); }
+  .sidebar .global-search-wrap input:focus{ background:rgba(255,255,255,.24) !important; }
+  .global-search-results{ position:absolute; top:calc(100% + 6px); left:0; right:0; background:#fff; color:var(--ink); border-radius:16px; box-shadow:0 12px 30px rgba(0,0,0,.25); z-index:80; max-height:340px; overflow-y:auto; }
+  .global-search-item{ display:flex; flex-direction:column; gap:1px; padding:9px 14px; cursor:pointer; border-bottom:1px solid var(--line); font-size:14px; }
   .global-search-item:last-child{ border-bottom:none; }
   .global-search-item:hover{ background:var(--accent-soft); }
-  .nav-group-label:first-of-type{ padding-top:4px; }
-  .nav-item{
-    display:flex; align-items:center; gap:10px; padding:11px 12px; border-radius:10px; cursor:pointer; font-family:'Baloo 2',sans-serif;
-    font-size:18.5px; font-weight:600; color:var(--ink-soft); margin-bottom:2px; transition:background .12s ease, transform .1s ease;
-  }
-  .nav-item:hover{ background:var(--accent-soft); }
-  .nav-item:active{ transform:scale(.97); }
-  .nav-item.active{ background:var(--accent); color:#fff; font-weight:600; }
-  .nav-icon{ width:18px; text-align:center; font-size:17px; }
-  .nav-badge{ margin-left:auto; background:var(--danger); color:#fff; font-size:12.5px; padding:2px 7px; border-radius:20px; font-weight:600;}
-  .sidebar-foot{ margin-top:auto; padding:12px 8px 0 8px; border-top:1px solid var(--line); font-size:13px; color:var(--ink-faint); line-height:1.5;}
-
+  .nav-foot{ margin-top:6px; }
+  .nav-foot-text{ display:none; font-size:11.5px; line-height:1.45; color:rgba(255,255,255,.55); padding:6px 12px 0; }
+  .sidebar.open .nav-foot-text{ display:block; }
+  .nav-fab{ display:none; position:fixed; left:14px; top:14px; z-index:60; width:46px; height:46px; border-radius:50%; border:0; background:var(--rail); color:#fff; box-shadow:0 6px 16px rgba(23,66,63,.35); cursor:pointer; align-items:center; justify-content:center; padding:0; }
+  .nav-fab svg{ width:22px; height:22px; fill:none; stroke:currentColor; stroke-width:2; stroke-linecap:round; }
+  .nav-backdrop{ display:none; }
 
   /* ---------- Main ---------- */
   .main{ flex:1; padding:30px 38px 60px 38px; max-width:1180px; animation: pageIn .32s cubic-bezier(.22,1,.36,1); }
@@ -229,19 +265,19 @@
 
   @media print{
     .no-print{ display:none !important; }
-    .sidebar{ display:none !important; }
+    .sidebar-wrap, .nav-fab{ display:none !important; }
     .main{ padding:0; max-width:100%; }
     body{ background:#fff; }
     .card{ box-shadow:none; border:none; padding:0; margin-bottom:20px;}
   }
   @media (max-width: 880px){
-    #app{ flex-direction:column; }
-    .sidebar{ width:100%; flex-direction:row; overflow-x:auto; padding:12px; align-items:center; }
-    .brand{ display:none; }
-    .global-search-wrap{ display:none; }
-    .sidebar-foot{ display:none; }
-    .nav-item{ white-space:nowrap; }
-    .main{ padding:20px; }
+    .sidebar-wrap{ width:0; }
+    .sidebar{ width:236px; transform:translateX(-130%); border-radius:30px; }
+    .sidebar.open{ transform:none; }
+    .nav-fab{ display:flex; }
+    .nav-toggle{ display:none; }
+    .sidebar.open ~ .nav-backdrop{ display:block; position:fixed; inset:0; background:rgba(15,32,30,.35); z-index:65; }
+    .main{ padding:72px 18px 24px; }
     .grid-2, .grid-3, .grid-4{ grid-template-columns:1fr; }
   }
 
@@ -561,6 +597,7 @@ const state = {
   teamsReportPrompt: '',
   violationsSort: 'count-desc',
   globalSearch: '',
+  navOpen: false, // menu trái: mặc định thu lại, chỉ còn icon
   studentProfileId: null,
   loaded:false,
   modal:null, // {type:'prompt'|'confirm', title, value, danger, onSubmit}
@@ -1017,6 +1054,26 @@ const NAV = [
   {id:'challenges', icon:'⚑', label:'Challenge', group:'occasional'},
   {id:'records', icon:'🗂️', label:'Lưu trữ hồ sơ', group:'occasional'},
 ];
+const NAV_ICONS = {
+  home:'<rect x="3.5" y="3.5" width="7" height="7" rx="2"/><rect x="13.5" y="3.5" width="7" height="7" rx="2"/><rect x="3.5" y="13.5" width="7" height="7" rx="2"/><rect x="13.5" y="13.5" width="7" height="7" rx="2"/>',
+  session:'<path d="M4 20h4L18.5 9.5a2.1 2.1 0 0 0-3-3L5 17v3z"/><path d="M13.5 8.5l3 3"/>',
+  callname:'<rect x="4" y="4" width="16" height="16" rx="4.5"/><circle cx="9" cy="9" r="1.1" fill="currentColor" stroke="none"/><circle cx="15" cy="9" r="1.1" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1.1" fill="currentColor" stroke="none"/><circle cx="9" cy="15" r="1.1" fill="currentColor" stroke="none"/><circle cx="15" cy="15" r="1.1" fill="currentColor" stroke="none"/>',
+  report:'<rect x="5" y="3.5" width="14" height="17.5" rx="3"/><path d="M9 8.5h6M9 12.5h6M9 16.5h3.5"/>',
+  progress:'<path d="M3.5 17l5-5.5 4 3.5 7.5-9"/><path d="M15.5 6h4.5v4.5"/>',
+  attendance:'<rect x="3.5" y="5" width="17" height="15.5" rx="3"/><path d="M8 3v4M16 3v4M3.5 10h17M9 15l2.2 2.2L15.5 13"/>',
+  gradebook:'<path d="M5 4.5h10.5A3.5 3.5 0 0 1 19 8v12H8.5A3.5 3.5 0 0 1 5 16.5v-12z"/><path d="M5 16.5A3.5 3.5 0 0 1 8.5 13H19"/>',
+  contacts:'<path d="M4 6.5A2.5 2.5 0 0 1 6.5 4h11A2.5 2.5 0 0 1 20 6.5v7a2.5 2.5 0 0 1-2.5 2.5H11l-4.5 4v-4A2.5 2.5 0 0 1 4 13.5v-7z"/>',
+  homeroom:'<path d="M2.5 9.5L12 5l9.5 4.5L12 14 2.5 9.5z"/><path d="M6.5 11.5V16c0 1.2 2.5 2.5 5.5 2.5s5.5-1.3 5.5-2.5v-4.5M21.5 9.5V15"/>',
+  honors:'<circle cx="12" cy="9" r="5"/><path d="M8.7 13.3L7 21l5-2.8 5 2.8-1.7-7.7"/>',
+  riskMgmt:'<path d="M12 4l9 15.5H3L12 4z"/><path d="M12 10v4.2"/><circle cx="12" cy="17" r=".7" fill="currentColor" stroke="none"/>',
+  classes:'<circle cx="9" cy="8.5" r="3.2"/><path d="M3 19.5c.6-3.3 3-5 6-5s5.4 1.7 6 5"/><path d="M16 5.6a3 3 0 0 1 0 5.8M18 14.8c1.7.6 2.7 2.1 3 4.7"/>',
+  certificates:'<rect x="3.5" y="5.5" width="17" height="13" rx="3"/><path d="M4 7.5l8 6 8-6"/>',
+  challenges:'<path d="M6 21V4"/><path d="M6 5h11l-2 4 2 4H6"/>',
+  records:'<rect x="3.5" y="4" width="17" height="5" rx="1.8"/><path d="M5 9v9a2.5 2.5 0 0 0 2.5 2.5h9A2.5 2.5 0 0 0 19 18V9M10 13h4"/>',
+  search:'<circle cx="11" cy="11" r="6.5"/><path d="M16 16l4.5 4.5"/>',
+  sync:'<path d="M7 18a4.5 4.5 0 0 1-.6-8.96A6 6 0 0 1 17.9 8.6 4.7 4.7 0 0 1 17 18H7z"/>',
+};
+const navIcon = id => `<span class="nav-icon"><svg viewBox="0 0 24 24">${NAV_ICONS[id]||''}</svg></span>`;
 const NAV_GROUPS = [
   {key:'daily', label:'Hàng ngày'},
   {key:'periodic', label:'Định kỳ'},
@@ -1043,37 +1100,43 @@ function render(){
   }
 
   app.innerHTML = `
-    <div class="sidebar no-print">
-      <div class="brand">
-        <div class="brand-mark">E</div>
-        <div>
-          <div class="brand-name">EduTrack</div>
-          <div class="brand-sub">Trợ lý giảng dạy</div>
+    <div class="sidebar-wrap no-print">
+      <div class="sidebar ${state.navOpen?'open':''}">
+        <button class="nav-toggle" data-action="toggle-nav" title="Mở / thu menu"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M9.5 6l6 6-6 6"/></svg></button>
+        <div class="nav-brand" title="EduTrack — Trợ lý giảng dạy">
+          <div class="brand-mark">E</div>
+          <div class="brand-txt"><b>EduTrack</b><small>Trợ lý giảng dạy</small></div>
+        </div>
+        <div class="nav-item nav-search-btn" data-action="nav-search" title="Tìm học sinh">${navIcon('search')}<span class="nav-label">Tìm học sinh</span></div>
+        <div class="global-search-wrap">
+          <input type="text" id="global-student-search" placeholder="Tìm học sinh..." value="${esc(state.globalSearch||'')}" autocomplete="off">
+          ${searchQuery ? `
+          <div class="global-search-results">
+            ${searchMatches.length ? searchMatches.map(m=>`
+              <div class="global-search-item" data-action="goto-student-profile" data-student="${m.id}" data-class="${m.classId}">
+                <b>${esc(m.name)}</b><span class="tiny" style="color:var(--ink-faint);">${esc(m.className)}</span>
+              </div>`).join('') : `<div class="global-search-item tiny" style="color:var(--ink-faint);cursor:default;">Không tìm thấy học sinh nào.</div>`}
+          </div>` : ''}
+        </div>
+        <div class="nav-scroll">
+          ${NAV_GROUPS.map((g,gi)=>`
+            <div class="nav-sep"><span>${g.label}</span></div>
+            ${NAV.filter(n=>n.group===g.key).map(n=>`
+              <div class="nav-item ${state.tab===n.id?'active':''}" data-nav="${n.id}" title="${n.label}">
+                ${navIcon(n.id)}<span class="nav-label">${n.label}</span>
+                ${n.id==='home' && warnCount>0 ? `<span class="nav-badge">${warnCount}</span>`:''}
+              </div>`).join('')}
+          `).join('')}
+        </div>
+        <div class="nav-foot">
+          <div class="nav-sep"></div>
+          <div class="nav-item" data-nav="home" title="${RUNNING_STANDALONE ? 'Dữ liệu lưu trên trình duyệt này — dùng thẻ Đồng bộ &amp; Sao lưu ở Trang chủ để đồng bộ nhiều thiết bị.' : 'Chế độ dùng chung: mọi người mở file này đều thấy và sửa được cùng một dữ liệu.'}">${navIcon('sync')}<span class="nav-label">Đồng bộ &amp; Sao lưu</span></div>
+          <div class="nav-foot-text">${RUNNING_STANDALONE ? '💻 Lưu trên trình duyệt này' : '⚠ Chế độ dùng chung'} · v${APP_VERSION}</div>
         </div>
       </div>
-      <div class="global-search-wrap">
-        <input type="text" id="global-student-search" placeholder="🔍 Tìm học sinh..." value="${esc(state.globalSearch||'')}" autocomplete="off">
-        ${searchQuery ? `
-        <div class="global-search-results">
-          ${searchMatches.length ? searchMatches.map(m=>`
-            <div class="global-search-item" data-action="goto-student-profile" data-student="${m.id}" data-class="${m.classId}">
-              <b>${esc(m.name)}</b><span class="tiny" style="color:var(--ink-faint);">${esc(m.className)}</span>
-            </div>`).join('') : `<div class="global-search-item tiny" style="color:var(--ink-faint);cursor:default;">Không tìm thấy học sinh nào.</div>`}
-        </div>` : ''}
-      </div>
-      ${NAV_GROUPS.map(g=>`
-        <div class="nav-group-label">${g.label}</div>
-        ${NAV.filter(n=>n.group===g.key).map(n=>`
-          <div class="nav-item ${state.tab===n.id?'active':''}" data-nav="${n.id}">
-            <span class="nav-icon">${n.icon}</span><span>${n.label}</span>
-            ${n.id==='home' && warnCount>0 ? `<span class="nav-badge">${warnCount}</span>`:''}
-          </div>`).join('')}
-      `).join('')}
-      <div class="sidebar-foot">
-        <div>${RUNNING_STANDALONE ? '💻 Đang chạy độc lập: dữ liệu lưu ngay trên trình duyệt này — dùng thẻ "Đồng bộ &amp; Sao lưu" ở Trang chủ để đồng bộ nhiều thiết bị.' : '⚠ Chế độ dùng chung: mọi người mở file này đều thấy và sửa được cùng một dữ liệu.'}</div>
-        <div class="tiny" style="margin-top:8px;opacity:.7;">Phiên bản app: ${APP_VERSION}</div>
-      </div>
+      <div class="nav-backdrop"></div>
     </div>
+    <button class="nav-fab no-print" data-action="toggle-nav" title="Mở menu"><svg viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button>
     <input type="file" id="backup-file-input" accept=".json" style="display:none;">
     <div class="main">${renderTab()}</div>
     ${renderModal()}
@@ -5286,7 +5349,7 @@ function attachHandlers(){
   const app = document.getElementById('app');
 
   app.querySelectorAll('[data-nav]').forEach(elx=>{
-    elx.addEventListener('click', ()=>{ state.tab = elx.dataset.nav; render(); });
+    elx.addEventListener('click', ()=>{ state.tab = elx.dataset.nav; state.navOpen = false; render(); window.scrollTo(0,0); });
   });
 
   app.querySelectorAll('[data-action]').forEach(elx=>{
@@ -5425,6 +5488,20 @@ function attachHandlers(){
   });
 }
 
+function setNavOpen(open){
+  state.navOpen = !!open;
+  const sb = document.querySelector('.sidebar');
+  if(sb) sb.classList.toggle('open', state.navOpen);
+}
+// bấm ra ngoài menu (hoặc chọn kết quả tìm kiếm) thì menu tự thu lại
+document.addEventListener('click', (e)=>{
+  if(!state.navOpen) return;
+  const t = e.target;
+  if(t.closest && t.closest('.global-search-item')){ setNavOpen(false); return; }
+  if(t.closest && t.closest('.sidebar, .nav-fab')) return;
+  setNavOpen(false);
+});
+
 async function handleFieldChange(elx){
   const sess = ensureSessionEditable();
   sess[elx.dataset.field] = elx.value;
@@ -5434,6 +5511,8 @@ async function handleFieldChange(elx){
 async function handleAction(action, elx, e){
   if(action.indexOf('gt-')===0){ GT.handle(action, elx, e); return; }
   switch(action){
+    case 'toggle-nav': { setNavOpen(!state.navOpen); break; }
+    case 'nav-search': { setNavOpen(true); setTimeout(()=>{ const i=document.getElementById('global-student-search'); if(i) i.focus(); }, 280); break; }
     case 'go-classes': state.tab='classes'; render(); break;
     case 'export-backup': exportBackup(); break;
     case 'trigger-backup-import': {
