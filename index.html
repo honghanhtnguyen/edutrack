@@ -219,6 +219,35 @@
 
   .warn-banner{ display:flex; gap:12px; align-items:flex-start; background:var(--danger-soft); border:1px solid #E8C3BE; border-radius:var(--radius); padding:14px 16px; margin-bottom:12px; }
   .warn-banner .dot{ width:9px;height:9px; border-radius:50%; background:var(--danger); margin-top:5px; flex-shrink:0; }
+
+
+  .tiny.score-computed{ color:var(--accent-deep); font-weight:700; font-size:14px; }
+
+  /* ---------- Chuyển động nhẹ ---------- */
+  @keyframes pageIn{ from{ opacity:0; transform:translateY(10px); } to{ opacity:1; transform:none; } }
+  @keyframes chartReveal{ from{ clip-path:inset(0 100% 0 0); } to{ clip-path:inset(0 0 0 0); } }
+  .main.page-in{ animation:pageIn .22s ease backwards; }
+  .main.page-in svg.chart-line{ animation:chartReveal .9s cubic-bezier(.22,1,.36,1) .12s backwards; }
+  .card, .stat-box{ transition:box-shadow .2s ease, transform .2s ease; }
+  tr.ledger{ transition:background-color .15s ease; }
+  @media (prefers-reduced-motion: reduce){
+    .main.page-in, .main.page-in svg.chart-line{ animation:none; }
+    .attn-body, .attn-chev, .btn{ transition:none; }
+  }
+
+  /* ---------- Thẻ cần chú ý theo lớp ---------- */
+  .attn-list{ display:flex; flex-direction:column; gap:10px; }
+  .attn-class{ background:var(--danger-soft); border:1px solid #E8C3BE; border-radius:var(--radius); overflow:hidden; }
+  .attn-head{ display:flex; align-items:center; gap:12px; width:100%; border:0; background:transparent; padding:13px 16px; font:inherit; cursor:pointer; text-align:left; color:inherit; }
+  .attn-head .dot{ width:9px; height:9px; border-radius:50%; background:var(--danger); flex-shrink:0; }
+  .attn-name{ font-family:'Baloo 2',sans-serif; font-weight:700; font-size:18px; }
+  .attn-sum{ flex:1; color:var(--ink-soft); font-size:15px; }
+  .attn-chev{ transition:transform .25s ease; font-size:18px; }
+  .attn-class.open .attn-chev{ transform:rotate(180deg); }
+  .attn-body{ display:grid; grid-template-rows:0fr; transition:grid-template-rows .28s ease; }
+  .attn-class.open .attn-body{ grid-template-rows:1fr; }
+  .attn-inner{ overflow:hidden; min-height:0; }
+  .attn-row{ display:flex; gap:12px; align-items:flex-start; padding:11px 16px; border-top:1px solid #E8C3BE; background:rgba(255,255,255,.55); }
   .warn-title{ font-weight:700; font-size:16px; }
   .warn-detail{ font-size:14.5px; color:var(--ink-soft); margin-top:2px; }
 
@@ -954,26 +983,44 @@ function studentScoreSeries(classId, studentId){
   return out;
 }
 
+// Luật cảnh báo (chỉ cần MỘT trong hai là báo), tính theo tháng có buổi học gần nhất:
+//  (1) hw : > 40% bài tập trong tháng không hoàn thành (chưa làm = 1, làm chưa đủ = 0,5); cần >= 3 lượt bài mới xét
+//  (2) gap: khoảng cách điểm với TB lớp rộng thêm >= 2 điểm so với tháng trước (em tụt nhiều hơn mặt bằng chung)
+const ATTN_RULE = { hwFail:0.4, hwMin:3, gapDrop:2 };
 function getWarnings(classId){
   const warns = [];
   const students = getStudents(classId);
   const sessions = getSessions(classId);
+  const months = Array.from(new Set(sessions.map(s=>monthKey(s.date)))).sort();
+  if(!months.length) return warns;
+  const M = months[months.length-1];
+  const P = prevMonthKey(M);
+  const monthSessions = sessions.filter(s=>monthKey(s.date)===M);
   students.forEach(st=>{
-    // consecutive absences (last 2+ recorded sessions)
-    const attended = sessions.filter(s=> s.attendance[st.id]);
-    if(attended.length>=2){
-      const lastTwo = attended.slice(-2);
-      if(lastTwo.every(s=>s.attendance[st.id]==='absent')){
-        warns.push({studentId:st.id, name:st.name, type:'absence', detail:`Vắng ${lastTwo.length} buổi liên tiếp gần đây nhất`});
-      }
+    let total=0, bad=0, none=0, partial=0;
+    monthSessions.forEach(s=>{
+      (s.exerciseTypes||[]).forEach(t=>{
+        total++;
+        const v = ((s.checklist||{})[st.id]||{})[t.id] || 'none';
+        if(v==='none'){ bad+=1; none++; } else if(v==='partial'){ bad+=0.5; partial++; }
+      });
+    });
+    if(total>=ATTN_RULE.hwMin && bad/total > ATTN_RULE.hwFail){
+      const pct = Math.round(bad/total*100);
+      warns.push({studentId:st.id, name:st.name, type:'hw', label:'bài tập không hoàn thành nhiều',
+        detail:`${monthLabel(M)}: ${pct}% bài chưa hoàn thành (${none} chưa làm, ${partial} làm chưa đủ / ${total} lượt giao)`});
     }
-    // declining scores (last 3 sessions strictly decreasing)
     const series = studentScoreSeries(classId, st.id);
-    if(series.length>=3){
-      const last3 = series.slice(-3);
-      if(last3[0].score > last3[1].score && last3[1].score > last3[2].score){
-        warns.push({studentId:st.id, name:st.name, type:'decline', detail:`Điểm giảm dần 3 buổi gần nhất: ${last3.map(x=>x.score.toFixed(1)).join(' → ')}`});
-      }
+    const mean = arr => arr.length ? arr.reduce((x,y)=>x+y,0)/arr.length : null;
+    const gapOf = mk => {
+      const part = series.filter(x=>monthKey(x.date)===mk && x.classAvg!==null && x.classAvg!==undefined);
+      if(!part.length) return null;
+      return mean(part.map(x=>x.score)) - mean(part.map(x=>x.classAvg));
+    };
+    const gM = gapOf(M), gP = gapOf(P);
+    if(gM!==null && gP!==null && (gP - gM) >= ATTN_RULE.gapDrop){
+      warns.push({studentId:st.id, name:st.name, type:'gap', label:'điểm tụt so với mặt bằng lớp',
+        detail:`Khoảng cách với TB lớp: ${gP>=0?'+':''}${gP.toFixed(1)} (${monthLabel(P)}) → ${gM>=0?'+':''}${gM.toFixed(1)} (${monthLabel(M)}), rộng thêm ${(gP-gM).toFixed(1)} điểm`});
     }
   });
   return warns;
@@ -1042,7 +1089,6 @@ const NAV = [
   {id:'session', icon:'✎', label:'Buổi học', group:'daily'},
   {id:'callname', icon:'🎲', label:'Gọi tên', group:'daily'},
   {id:'report', icon:'▣', label:'Báo cáo', group:'periodic'},
-  {id:'progress', icon:'∿', label:'Tiến độ', group:'periodic'},
   {id:'attendance', icon:'☷', label:'Chuyên cần', group:'periodic'},
   {id:'gradebook', icon:'📒', label:'Sổ điểm', group:'periodic'},
   {id:'contacts', icon:'☎', label:'Trao đổi PH', group:'periodic'},
@@ -1141,8 +1187,15 @@ function render(){
     <div class="main">${renderTab()}</div>
     ${renderModal()}
   `;
+  // Hiệu ứng vào màn: chỉ chạy khi đổi tab (không chạy lại mỗi lần gõ/nhập điểm)
+  if(state.tab !== _lastRenderedTab){
+    const mainEl = app.querySelector('.main');
+    if(mainEl) mainEl.classList.add('page-in');
+    _lastRenderedTab = state.tab;
+  }
   attachHandlers();
 }
+let _lastRenderedTab = null;
 
 function renderTab(){
   switch(state.tab){
@@ -1151,7 +1204,6 @@ function renderTab(){
     case 'session': return renderSession();
     case 'callname': return renderGoiTen();
     case 'report': return renderReport();
-    case 'progress': return renderProgress();
     case 'attendance': return renderAttendanceExport();
     case 'gradebook': return renderGradebook();
     case 'contacts': return renderContacts();
@@ -1380,41 +1432,53 @@ function renderHome(){
   const today = todayISO();
   const suggestions = getTodaySuggestions();
 
-  // Gộp việc cần chú ý hôm nay: cảnh báo học sinh + nhiệm vụ quá hạn
-  const attentionItems = [];
+  // Việc cần chú ý: mỗi lớp là một thẻ gọn, bấm vào mới mở danh sách chi tiết
+  const attnClasses = [];
   state.classes.forEach(c=>{
+    const byStu = {};
     getWarnings(c.id).forEach(w=>{
-      attentionItems.push({
-        icon:'⚠', title:`${w.name} — ${w.type==='absence'?'Vắng học liên tiếp':'Điểm giảm dần'}`,
-        detail:`${c.name} · ${w.detail}`,
-        actionLabel:'Xem báo cáo', action:'goto-report', classId:c.id, studentId:w.studentId
-      });
+      (byStu[w.studentId] = byStu[w.studentId] || {studentId:w.studentId, name:w.name, reasons:[]}).reasons.push(w);
     });
-    (c.tasks||[]).forEach(t=>{
-      if(!t.completed && t.dueDate && t.dueDate < today){
-        attentionItems.push({
-          icon:'⏰', title:`Nhiệm vụ quá hạn: ${t.title}`,
-          detail:`${c.name} · Hạn hoàn thành: ${fmtDateVN(t.dueDate)}`,
-          actionLabel:'Xem nhiệm vụ', action:'goto-duties', classId:c.id
-        });
-      }
-    });
+    const students = Object.values(byStu);
+    const overdue = (c.tasks||[]).filter(t=> !t.completed && t.dueDate && t.dueDate < today);
+    if(students.length || overdue.length) attnClasses.push({cls:c, students, overdue});
   });
-
-  const attentionHtml = attentionItems.length ? `
+  state.attnOpen = state.attnOpen || {};
+  const attentionHtml = attnClasses.length ? `
     <div class="card">
-      <div class="card-title">🔔 Cần chú ý hôm nay <span class="tiny">(${attentionItems.length})</span></div>
-      ${attentionItems.map(item=>`
-        <div class="warn-banner">
-          <div class="dot"></div>
-          <div style="flex:1;">
-            <div class="warn-title">${item.icon} ${esc(item.title)}</div>
-            <div class="warn-detail">${esc(item.detail)}</div>
-          </div>
-          <button class="btn btn-outline btn-sm" data-action="${item.action}" data-class="${item.classId}" ${item.studentId?`data-student="${item.studentId}"`:''}>${item.actionLabel}</button>
-        </div>`).join('')}
+      <div class="card-title">🔔 Cần chú ý <span class="tiny">(${attnClasses.length} lớp)</span></div>
+      <div class="attn-list">
+      ${attnClasses.map(({cls:c, students, overdue})=>{
+        const parts = [];
+        if(students.length) parts.push(`${students.length} em cần chú ý`);
+        if(overdue.length) parts.push(`${overdue.length} nhiệm vụ quá hạn`);
+        return `<div class="attn-class ${state.attnOpen[c.id]?'open':''}" data-attn="${c.id}">
+          <button class="attn-head" data-action="toggle-attn" data-class="${c.id}">
+            <span class="dot"></span>
+            <span class="attn-name">${esc(c.name)}</span>
+            <span class="attn-sum">${parts.join(' · ')}</span>
+            <span class="attn-chev">▾</span>
+          </button>
+          <div class="attn-body"><div class="attn-inner">
+            ${students.map(st=>`
+              <div class="attn-row">
+                <div style="flex:1;">
+                  <div class="warn-title">${esc(st.name)} <span class="tiny">— ${st.reasons.map(r=>r.label).join('; ')}</span></div>
+                  ${st.reasons.map(r=>`<div class="warn-detail">${esc(r.detail)}</div>`).join('')}
+                </div>
+                <button class="btn btn-outline btn-sm" data-action="goto-report" data-class="${c.id}" data-student="${st.studentId}">Xem báo cáo</button>
+              </div>`).join('')}
+            ${overdue.map(t=>`
+              <div class="attn-row">
+                <div style="flex:1;"><div class="warn-title">⏰ Nhiệm vụ quá hạn: ${esc(t.title)}</div><div class="warn-detail">Hạn hoàn thành: ${fmtDateVN(t.dueDate)}</div></div>
+                <button class="btn btn-outline btn-sm" data-action="goto-duties" data-class="${c.id}">Xem nhiệm vụ</button>
+              </div>`).join('')}
+          </div></div>
+        </div>`;
+      }).join('')}
+      </div>
     </div>
-  ` : `<div class="card"><div class="card-title">✓ Không có gì cần chú ý</div><div class="muted">Chưa có cảnh báo, chép phạt còn nợ hay nhiệm vụ quá hạn nào.</div></div>`;
+  ` : `<div class="card"><div class="card-title">✓ Không có gì cần chú ý</div><div class="muted">Chưa có học sinh nào chạm ngưỡng cảnh báo, chép phạt còn nợ hay nhiệm vụ quá hạn nào.</div></div>`;
 
   const totalStudents = state.classes.reduce((s,c)=>s+c.students.length,0);
   const totalSessions = state.classes.reduce((s,c)=>s+getSessions(c.id).length,0);
@@ -1559,7 +1623,7 @@ function renderArchivedStudents(cls){
 
 /* ============================================================
    SỔ ĐIỂM (chỉ lớp được bật hasGradebook)
-   ĐTB = (tổng 4 bài HS1 + 2×HS2 + 3×HS3) / 9. Điểm miệng là điểm dự phòng: bù vào ô HS1 còn trống.
+   ĐTB = (tổng 4 bài HS1 + 2×HS2 + 3×HS3) / 9. Điểm miệng chỉ ghi nhận, không tính vào ĐTB.
 ============================================================ */
 // Lớp chủ nhiệm: chỉ lớp được bật mới dùng được tab Chủ nhiệm.
 // Lớp chưa từng bật/tắt mà đã có dữ liệu chủ nhiệm cũ thì tự coi là lớp chủ nhiệm (không làm mất dữ liệu đang dùng).
@@ -1590,8 +1654,7 @@ function computeGradebookAvg(rec){
   const used = (rec.hs1||[]).slice(0,4).map(gbParse).filter(v=>v!==null);
   const hs1Count = used.length;
   const oral = gbParse(rec.oral), hs2 = gbParse(rec.hs2), hs3 = gbParse(rec.hs3);
-  let usedOral = false;
-  if(oral!==null && used.length<4){ used.push(oral); usedOral = true; }
+  const usedOral = false; // điểm miệng chỉ để ghi nhận, không tính vào ĐTB
   let sum = used.reduce((a,b)=>a+b,0), w = used.length;
   if(hs2!==null){ sum += hs2*2; w += 2; }
   if(hs3!==null){ sum += hs3*3; w += 3; }
@@ -1653,21 +1716,22 @@ function renderGradebook(){
   return head + `
     <div class="card" style="display:flex; gap:16px; align-items:flex-end; flex-wrap:wrap;">
       <div><label class="field-label">Lớp</label><select class="class-select" data-action="gradebook-change-class">${classOptions}</select></div>
-      <div class="tiny" style="flex:1; min-width:240px;">ĐTB = (tổng 4 bài HS1 + 2 × HS2 + 3 × HS3) ÷ 9. Điểm miệng là điểm dự phòng — chỉ được tính khi còn thiếu ô HS1. Chưa đủ cột điểm thì ĐTB hiện mờ (tạm tính). Enter để nhảy xuống ô dưới.</div>
+      <div class="tiny" style="flex:1; min-width:240px;">ĐTB = (tổng 4 bài HS1 + 2 × HS2 + 3 × HS3) ÷ 9. Hai cột Điểm miệng và Điểm cộng chỉ để ghi nhận, không tính vào ĐTB. Chưa đủ cột điểm thì ĐTB hiện mờ (tạm tính). Enter để nhảy xuống ô dưới.</div>
     </div>
     <div class="card">
       ${cls.students.length ? `
       <div style="overflow-x:auto;">
-      <table class="session-table" style="min-width:860px;">
+      <table class="session-table" style="min-width:980px;">
         <thead>
           <tr>
             <th rowspan="2" style="width:36px;">#</th>
             <th rowspan="2" style="min-width:150px;">Học sinh</th>
             <th colspan="4" style="text-align:center;">Hệ số 1 (4 bài)</th>
-            <th rowspan="2" style="text-align:center;">Điểm miệng<div class="tiny" style="text-transform:none;letter-spacing:0;">(dự phòng)</div></th>
+            <th rowspan="2" style="text-align:center;">Điểm miệng<div class="tiny" style="text-transform:none;letter-spacing:0;">(không tính ĐTB)</div></th>
             <th rowspan="2" style="text-align:center;">Hệ số 2<div class="tiny" style="text-transform:none;letter-spacing:0;">(1 bài)</div></th>
             <th rowspan="2" style="text-align:center;">Hệ số 3<div class="tiny" style="text-transform:none;letter-spacing:0;">(1 bài)</div></th>
             <th rowspan="2" style="text-align:center;min-width:80px;">ĐTB</th>
+            <th rowspan="2" style="text-align:center;min-width:84px;border-left:2px solid var(--line);">Điểm cộng<div class="tiny" style="text-transform:none;letter-spacing:0;">(không tính ĐTB)</div></th>
           </tr>
           <tr><th style="text-align:center;">Bài 1</th><th style="text-align:center;">Bài 2</th><th style="text-align:center;">Bài 3</th><th style="text-align:center;">Bài 4</th></tr>
         </thead>
@@ -1684,6 +1748,7 @@ function renderGradebook(){
             <td style="text-align:center;">${inp(s.id,'hs2',0,r.hs2)}</td>
             <td style="text-align:center;">${inp(s.id,'hs3',0,r.hs3)}</td>
             <td class="mono" style="text-align:center;font-weight:700;${gbAvgStyle(c.avg)}${c.avg!==null && !c.complete ? 'opacity:.6;' : ''}" data-gb-avg="${s.id}" title="${c.avg===null ? '' : (c.complete ? 'Đủ cột điểm' : 'Tạm tính — chưa đủ cột điểm') + (c.usedOral ? ' · đã dùng điểm miệng bù HS1' : '')}">${c.avg!==null ? c.avg.toFixed(1) : '—'}</td>
+            <td style="text-align:center;border-left:2px solid var(--line);">${inp(s.id,'bonus',0,r.bonus)}</td>
           </tr>`;
         }).join('')}
         </tbody>
@@ -1692,6 +1757,7 @@ function renderGradebook(){
             <td></td><td>Điểm trung bình</td>
             ${['hs1_0','hs1_1','hs1_2','hs1_3','oral','hs2','hs3'].map(k=>`<td class="mono" style="text-align:center;" data-gb-foot="${k}">${fv(k)}</td>`).join('')}
             <td class="mono" style="text-align:center;color:var(--accent-deep);" data-gb-foot="avg">${fv('avg')}</td>
+            <td style="border-left:2px solid var(--line);"></td>
           </tr>
         </tfoot>
       </table>
@@ -2061,7 +2127,7 @@ function generateClassRemark(classId){
   }
 
   const warns = getWarnings(classId);
-  const warnText = warns.length ? `Hiện có ${warns.length} lượt học sinh cần chú ý (vắng liên tiếp hoặc điểm giảm dần).` : 'Chưa có học sinh nào trong diện cần cảnh báo đặc biệt.';
+  const warnText = warns.length ? `Hiện có ${warns.length} lượt học sinh cần chú ý (bài tập không hoàn thành nhiều hoặc điểm tụt so với mặt bằng lớp).` : 'Chưa có học sinh nào trong diện cần cảnh báo đặc biệt.';
 
   const attendText = avgRate!==null ? `Tỷ lệ chuyên cần trung bình của lớp đạt ${avgRate}%.` : '';
 
@@ -2215,7 +2281,7 @@ function renderClassReportBody(classId){
   const validAvgs = allAvgs.filter(v=>v!==null);
   const classAvg = validAvgs.length? validAvgs.reduce((a,b)=>a+b,0)/validAvgs.length : null;
   const warns = getWarnings(classId);
-  const warnMap = {}; warns.forEach(w=>{ warnMap[w.studentId] = warnMap[w.studentId]? warnMap[w.studentId]+', '+ (w.type==='absence'?'vắng liên tiếp':'điểm giảm dần') : (w.type==='absence'?'vắng liên tiếp':'điểm giảm dần'); });
+  const warnMap = {}; warns.forEach(w=>{ warnMap[w.studentId] = warnMap[w.studentId] ? warnMap[w.studentId]+', '+w.label : w.label; });
   const checklistStats = students.map(s=>studentChecklistStats(classId, s.id));
   const validCl = checklistStats.filter(c=>c.rate!==null);
   const avgChecklist = validCl.length? Math.round(validCl.reduce((a,b)=>a+b.rate,0)/validCl.length) : null;
@@ -2311,19 +2377,20 @@ function renderClassReportBody(classId){
     })() : ''}
 
     <h3 style="font-size:16.5px;margin-bottom:10px;">Tổng hợp theo học sinh (toàn bộ)</h3>
-    <table style="margin-bottom:18px;"><thead><tr><th>Học sinh</th><th>Chuyên cần</th><th>Điểm TB</th><th>So với TB lớp</th><th>Hoàn thành BT</th><th>Ghi chú</th></tr></thead><tbody>
+    <table style="margin-bottom:18px;"><thead><tr><th>Học sinh</th><th>Chuyên cần</th><th>Điểm TB</th><th>So với TB lớp</th><th>Hoàn thành BT</th>${GT.hasData(classId)?'<th>Phát biểu</th>':''}<th>Ghi chú</th></tr></thead><tbody>
     ${students.map((s,i)=>{
       const att = studentAttendanceStats(classId, s.id);
       const series = studentScoreSeries(classId, s.id);
       const avg = series.length? series.reduce((a,b)=>a+b.score,0)/series.length : null;
       const diff = (avg!==null && classAvg!==null) ? avg-classAvg : null;
       const cl = checklistStats[i];
-      return `<tr class="ledger ${warnMap[s.id]?'flagged':''}">
+      return `<tr class="ledger ${warnMap[s.id]?'flagged':''}" style="cursor:pointer;" title="Bấm để xem báo cáo của em" data-action="report-pick-student" data-class="${classId}" data-student="${s.id}">
         <td>${esc(s.name)}</td>
         <td class="mono">${att.rate!==null?att.rate+'%':'—'}</td>
         <td class="mono">${avg!==null?avg.toFixed(1):'—'}</td>
         <td class="mono">${diff!==null? (diff>=0?'+':'')+diff.toFixed(1) : '—'}</td>
         <td class="mono">${cl.rate!==null?cl.rate+'%':'—'}</td>
+        ${GT.hasData(classId)?`<td class="mono">${GT.stats(classId,s.id).calls||'—'}</td>`:''}
         <td class="note-text">${esc(warnMap[s.id]||'')}</td>
       </tr>`;
     }).join('')}
@@ -2467,6 +2534,30 @@ function renderReport(){
       })()}
 
       ${GT.statBoxes(classId, studentId)}
+
+      ${(() => {
+        const series = studentScoreSeries(classId, studentId);
+        const myAvg = series.length ? series.reduce((a,b)=>a+b.score,0)/series.length : null;
+        const clAvgs = series.filter(x=>x.classAvg!==null && x.classAvg!==undefined);
+        const clAvg = clAvgs.length ? clAvgs.reduce((a,b)=>a+b.classAvg,0)/clAvgs.length : null;
+        const diff = (myAvg!==null && clAvg!==null) ? myAvg-clAvg : null;
+        const chart = series.length ? lineChartSVG(
+          series.map(x=>fmtDateVN(x.date)),
+          [
+            {name:esc(st.name), color:'var(--accent-deep)', values: series.map(x=>x.score)},
+            {name:'Trung bình lớp', color:'var(--ink-faint)', dash:'5,4', values: series.map(x=>x.classAvg)},
+          ]
+        ) : '';
+        return `<h3 style="font-size:16.5px;margin-bottom:10px;">📈 Tiến độ điểm số</h3>
+        <div class="grid-3" style="margin-bottom:14px;">
+          <div class="stat-box"><div class="stat-num">${myAvg!==null? myAvg.toFixed(1) : '—'}</div><div class="stat-label">Điểm TB của em</div></div>
+          <div class="stat-box"><div class="stat-num">${diff!==null? (diff>=0?'+':'')+diff.toFixed(1) : '—'}</div><div class="stat-label">So với TB lớp</div></div>
+          <div class="stat-box"><div class="stat-num">${series.length}</div><div class="stat-label">Buổi có điểm</div></div>
+        </div>
+        ${series.length ? `<div class="chart-in" style="margin-bottom:6px;">${chart}</div>
+          <div class="legend" style="margin-bottom:22px;"><span><i style="background:var(--accent-deep);"></i>${esc(st.name)}</span><span><i style="background:var(--ink-faint);"></i>Trung bình lớp</span></div>`
+          : `<div class="muted" style="margin-bottom:22px;">Chưa có dữ liệu điểm để vẽ biểu đồ.</div>`}`;
+      })()}
 
       ${(() => {
         const recent = studentRecentItems(classId, studentId, 8);
@@ -3262,6 +3353,68 @@ function prevMonthKey(month){
   return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
 }
 
+/* ---- Prompt báo cáo kết quả học tập tháng của 1 học sinh (theo mẫu "Báo cáo kết quả học tập tháng") ---- */
+function buildStudentMonthPrompt(classId, month, studentId){
+  const cls = getClass(classId);
+  const st = cls && cls.students.find(x=>x.id===studentId);
+  if(!st) return '';
+  const rec = ((cls.monthlyExams||{})[month]||{})[studentId] || {};
+  const prevRec = ((cls.monthlyExams||{})[prevMonthKey(month)]||{})[studentId] || {};
+  const monthNum = Number(month.slice(5));
+  const year = month.slice(0,4);
+  const has = v => v!==undefined && v!==null && v!=='';
+  const fmt = v => has(v) ? Number(v).toFixed(1).replace(/\.0$/,'') : '(để trống)';
+  const sessions = getSessions(classId).filter(x=>monthKey(x.date)===month);
+  const att = attendanceFromSessions(sessions, studentId);
+  const cl = checklistFromSessions(sessions, studentId);
+  const cond = conductSuggestion(classId, month, studentId);
+  const savedCond = ((cls.conduct||{})[month]||{})[studentId];
+  const rating = (savedCond && savedCond.rating) || cond.rating;
+  const L = [];
+  L.push('Hãy điền giúp tôi "BÁO CÁO KẾT QUẢ HỌC TẬP THÁNG" của học sinh dưới đây, theo đúng cấu trúc của mẫu báo cáo (nếu tôi có đính kèm file mẫu thì điền đúng vào mẫu đó, giữ nguyên định dạng; nếu không đính kèm thì trình bày nội dung theo đúng cấu trúc các mục I–IV bên dưới để tôi dán vào mẫu).');
+  L.push('');
+  L.push('=== I. THÔNG TIN HỌC SINH ===');
+  L.push(`Trường: THCS Trưng Vương · Năm học: 2026 – 2027`);
+  L.push(`Tháng báo cáo: ${monthNum}/${year}`);
+  L.push(`Mã báo cáo: ${cls.name}-BCTĐ-${monthNum}`);
+  L.push(`Họ và tên HS: ${st.name}`);
+  L.push(`Lớp: ${cls.name}`);
+  L.push('Ngày sinh: để trống (tôi tự điền)');
+  L.push('');
+  L.push('=== II. KẾT QUẢ CÁC MÔN HỌC TRONG THÁNG ===');
+  L.push('Chỉ điền điểm kiểm tra tháng của 4 môn dưới đây vào cột "TB tháng" của đúng môn. Các cột ĐGTX 1, ĐGTX 2, ĐGTX 3, cột "Nhận xét của GV bộ môn" và các môn còn lại: ĐỂ TRỐNG, không tự điền, không tự suy đoán.');
+  EXAM_SUBJECTS.forEach(([k,label])=>{
+    const prev = has(prevRec[k]) ? ` (tháng trước: ${fmt(prevRec[k])})` : '';
+    L.push(`- ${label}: ${fmt(rec[k])}${prev}`);
+  });
+  const avg = studentExamAvg(rec);
+  L.push(`- Điểm trung bình 4 môn trên: ${avg!==null ? avg.toFixed(1) : '(chưa đủ dữ liệu)'}`);
+  L.push('');
+  L.push('=== DỮ LIỆU THAM KHẢO ĐỂ VIẾT NHẬN XÉT (không đưa nguyên văn các số này vào bảng) ===');
+  L.push(`- Chuyên cần trong tháng: ${att.total ? `${att.rate}% (có mặt ${att.present}, vắng ${att.absent}, muộn ${att.late} / ${att.total} buổi)` : 'chưa có dữ liệu'}`);
+  L.push(`- Hoàn thành bài tập về nhà trong tháng: ${cl.total ? `${cl.rate}% (đầy đủ ${cl.full}, một phần ${cl.partial}, chưa làm ${cl.none} / ${cl.total} lượt giao)` : 'chưa có dữ liệu'}`);
+  L.push(`- Hạnh kiểm gợi ý của tháng: ${CONDUCT_LABEL[rating] || '—'}; số lần vi phạm trong tháng: ${cond.violCount}`);
+  L.push('');
+  L.push('=== III. NHẬN XÉT CỦA GIÁO VIÊN CHỦ NHIỆM ===');
+  L.push('Dựa vào dữ liệu trên, hãy viết 3 mục sau bằng tiếng Việt, giọng của giáo viên chủ nhiệm gửi phụ huynh: chân thành, cụ thể, tôn trọng, không so sánh với bạn khác, không nhắc điểm số của môn chưa có dữ liệu:');
+  L.push('- Ưu điểm: 2–3 câu nêu điểm tích cực thực sự có trong dữ liệu.');
+  L.push('- Cần cải thiện: 1–2 câu, nêu vấn đề nhẹ nhàng, có hướng khắc phục (nếu dữ liệu không có vấn đề rõ ràng thì ghi nhận xét chung về việc duy trì và nâng cao).');
+  L.push('- Mục tiêu tháng tới: 1–2 mục tiêu nhỏ, đo được, vừa sức.');
+  L.push('');
+  L.push('=== IV. Ý KIẾN CỦA PHỤ HUYNH ===');
+  L.push('Để trống cho phụ huynh ghi và ký.');
+  L.push('');
+  L.push('Chỉ trả lời nội dung đã điền, không giải thích thêm. Không bịa số liệu ngoài dữ liệu đã cho.');
+  return L.join('\n');
+}
+async function copyStudentMonthPrompt(classId, month, studentId){
+  const text = buildStudentMonthPrompt(classId, month, studentId);
+  if(!text){ showToast('Chưa tạo được prompt cho học sinh này.'); return; }
+  const ok = await copyTextToClipboard(text);
+  if(ok) showToast('Đã copy prompt — dán vào Claude (kèm file mẫu báo cáo nếu muốn điền vào mẫu).', 3400);
+  else openPromptModal('Copy prompt báo cáo tháng', text, ()=>{}, {multiline:true, submitLabel:'Đóng', hint:'Trình duyệt chặn copy tự động — cô bôi đen (Ctrl+A) rồi Ctrl+C nội dung bên dưới nhé.'});
+}
+
 function renderExamsSection(classId, cls){
   const month = state.homeroom.examMonth || todayISO().slice(0,7);
   const monthData = (cls.monthlyExams && cls.monthlyExams[month]) || {};
@@ -3275,7 +3428,7 @@ function renderExamsSection(classId, cls){
 
   const tableRows = rows.map(r=>`
     <tr class="ledger">
-      <td>${esc(r.name)}</td>
+      <td><span style="display:inline-flex;align-items:center;gap:8px;flex-wrap:wrap;">${esc(r.name)}<button class="btn btn-outline btn-sm no-print" title="Copy prompt báo cáo tháng của em này" data-action="copy-student-month-prompt" data-class="${classId}" data-month="${month}" data-student="${r.id}">📋 Prompt</button></span></td>
       ${EXAM_SUBJECTS.map(([k])=>`<td style="text-align:center;"><input class="score-input" type="number" min="0" max="10" step="0.5" value="${(r.rec[k]!==undefined && r.rec[k]!==null)?r.rec[k]:''}" data-action="set-exam-score" data-class="${classId}" data-month="${month}" data-student="${r.id}" data-subject="${k}"></td>`).join('')}
       <td class="mono" style="text-align:center;">${r.avg!==null? r.avg.toFixed(1) : '—'}</td>
     </tr>`).join('');
@@ -4946,7 +5099,7 @@ function lineChartSVG(labels, series){
     return `<path d="${d}" fill="none" stroke="${color}" stroke-width="2.2" ${dashAttr} stroke-linecap="round" stroke-linejoin="round"/>` + pts.join('');
   }).join('');
 
-  return `<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto;max-height:260px;">${gridLines.join('')}${lines}${xLabels}</svg>`;
+  return `<svg class="chart-line" viewBox="0 0 ${W} ${H}" style="width:100%;height:auto;max-height:260px;">${gridLines.join('')}${lines}${xLabels}</svg>`;
 }
 
 function pieChartSVG(data, px){
@@ -5750,7 +5903,7 @@ async function handleAction(action, elx, e){
       const val = raw==='' ? null : Math.round(clamp(Number(raw),0,10)*10)/10;
       const key = elx.dataset.key;
       if(key==='hs1') r.hs1[Number(elx.dataset.idx)||0] = val;
-      else if(key==='oral' || key==='hs2' || key==='hs3') r[key] = val;
+      else if(key==='oral' || key==='hs2' || key==='hs3' || key==='bonus') r[key] = val;
       saveClasses();
       updateGradebookDom(cls.id);
       break;
@@ -6001,7 +6154,15 @@ async function handleAction(action, elx, e){
       break;
     }
     case 'report-change-student': state.report.studentId = elx.value; render(); break;
+    case 'report-pick-student':
+      state.report.classId = elx.dataset.class; state.report.studentId = elx.dataset.student; state.report.mode='student'; render(); window.scrollTo(0,0); break;
     case 'report-set-mode': state.report.mode = elx.dataset.mode; render(); break;
+    case 'toggle-attn': {
+      const id = elx.dataset.class; state.attnOpen = state.attnOpen || {};
+      state.attnOpen[id] = !state.attnOpen[id];
+      const box = elx.closest('.attn-class'); if(box) box.classList.toggle('open', !!state.attnOpen[id]);
+      break;
+    }
     case 'goto-report':
       state.report.classId = elx.dataset.class; state.report.studentId = elx.dataset.student; state.report.mode='student';
       state.tab = 'report'; render(); break;
@@ -6192,6 +6353,7 @@ async function handleAction(action, elx, e){
       break;
     }
     case 'export-exams': exportExamsExcel(elx.dataset.class, elx.dataset.month); break;
+    case 'copy-student-month-prompt': copyStudentMonthPrompt(elx.dataset.class, elx.dataset.month, elx.dataset.student); break;
     case 'generate-exam-prompt': {
       state.homeroom.examPrompt = buildExamReportPrompt(elx.dataset.class, elx.dataset.month);
       render();
