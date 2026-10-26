@@ -1416,14 +1416,14 @@ function renderStudentProfile(){
     <div class="grid-2">
       <div class="card">
         <div class="card-title">
-          <span>⚠ Vi phạm nội quy <span class="tiny">(${violations.length})</span></span>
+          <span>⭐ Đóng góp / Vi phạm <span class="tiny">(${(st.contributions||[]).length} đóng góp · ${violations.length} vi phạm)</span></span>
           <button class="btn btn-outline btn-sm" data-action="goto-violations-profile" data-class="${classId}" data-student="${studentId}">Xem tất cả →</button>
         </div>
-        ${violations.length? violations.slice(0,3).map(v=>`
+        ${(()=>{ const ml = studentMeritLog(st).slice(0,3); return ml.length? ml.map(v=>`
           <div style="border-bottom:1px solid var(--line); padding:8px 0;">
-            <b class="tiny">${fmtDateVN(v.date)}</b> <span class="tiny mono" style="color:var(--danger);">−${v.points!==undefined?v.points:5}</span>
+            <b class="tiny">${fmtDateVN(v.date)}</b> ${v.kind==='c' ? `<span class="tiny mono" style="color:var(--success);font-weight:700;">+${v.points}</span>` : `<span class="tiny mono" style="color:var(--danger);font-weight:700;">−${v.points}</span>`}
             <div class="note-text">${esc(v.content)}</div>
-          </div>`).join('') : `<div class="muted">Chưa có vi phạm nào.</div>`}
+          </div>`).join('') : `<div class="muted">Chưa có ghi nhận nào.</div>`; })()}
       </div>
 
       <div class="card">
@@ -1666,7 +1666,7 @@ function renderArchivedStudents(cls){
 function hasHomeroomData(c){
   return !!((c.teams && c.teams.length) || (c.teamScores && c.teamScores.length) ||
     (c.monthlyExams && Object.keys(c.monthlyExams).length) || (c.conduct && Object.keys(c.conduct).length) ||
-    (c.students||[]).some(s=> (s.violations && s.violations.length) || (s.activities && s.activities.length)));
+    (c.students||[]).some(s=> (s.violations && s.violations.length) || (s.contributions && s.contributions.length) || (s.activities && s.activities.length)));
 }
 function isHomeroomClass(c){
   if(!c) return false;
@@ -3199,7 +3199,7 @@ function renderHomeroom(){
 
   const tabs = `<div class="tabs-sub">
     <button class="${section==='activities'?'on':''}" data-action="homeroom-set-section" data-section="activities">🙌 Hoạt động phong trào</button>
-    <button class="${section==='violations'?'on':''}" data-action="homeroom-set-section" data-section="violations">⚠ Vi phạm nội quy</button>
+    <button class="${section==='violations'?'on':''}" data-action="homeroom-set-section" data-section="violations">⭐ Đóng góp / Vi phạm</button>
     <button class="${section==='teams'?'on':''}" data-action="homeroom-set-section" data-section="teams">🏁 Thi đua tổ/nhóm</button>
     <button class="${section==='conduct'?'on':''}" data-action="homeroom-set-section" data-section="conduct">📋 Hạnh kiểm tháng</button>
     <button class="${section==='exams'?'on':''}" data-action="homeroom-set-section" data-section="exams">📊 Điểm KT tháng</button>
@@ -3798,33 +3798,48 @@ function buildExamReportPrompt(classId, month){
   return L.join('\n');
 }
 
-/* ---- Vi phạm nội quy ---- */
+/* ---- Đóng góp / Vi phạm: mỗi học sinh có 2 loại ghi nhận. Cả hai đều cộng/trừ vào điểm tổ ---- */
+function studentMeritLog(st){
+  const v = (st.violations||[]).map(x=>({...x, kind:'v', points: x.points!==undefined ? x.points : 5}));
+  const c = (st.contributions||[]).map(x=>({...x, kind:'c', points: x.points!==undefined ? x.points : 5}));
+  return v.concat(c).sort((a,b)=> b.date.localeCompare(a.date) || b.id.localeCompare(a.id));
+}
+function studentMeritTotals(st){
+  const vp = (st.violations||[]).reduce((a,b)=> a+(b.points!==undefined?b.points:5), 0);
+  const cp = (st.contributions||[]).reduce((a,b)=> a+(b.points!==undefined?b.points:5), 0);
+  return {vCount:(st.violations||[]).length, cCount:(st.contributions||[]).length, vPoints:vp, cPoints:cp, net:cp-vp};
+}
+
+/* ---- Đóng góp / Vi phạm ---- */
 function renderViolationsSection(classId, cls){
   const studentId = state.homeroom.violationStudentId;
   if(studentId){
     const st = cls.students.find(s=>s.id===studentId);
     if(!st) return `<div class="card empty"><h3>Không tìm thấy học sinh</h3></div>`;
-    const log = (st.violations||[]).slice().sort((a,b)=> b.date.localeCompare(a.date) || b.id.localeCompare(a.id));
+    const log = studentMeritLog(st);
+    const tot = studentMeritTotals(st);
     const team = st.teamId ? (cls.teams||[]).find(t=>t.id===st.teamId) : null;
     return `
       <div class="card">
         <div class="card-title">
-          <span>Vi phạm nội quy — ${esc(st.name)} (${log.length} lần)</span>
+          <span>Đóng góp / Vi phạm — ${esc(st.name)} <span class="tiny">(${tot.cCount} đóng góp · ${tot.vCount} vi phạm · điểm ròng ${tot.net>=0?'+':'−'}${Math.abs(tot.net)})</span></span>
           <button class="btn btn-outline btn-sm" data-action="violations-back">← Quay lại danh sách</button>
         </div>
         ${team ? `
-        <div class="tiny" style="background:var(--surface-alt); border-radius:8px; padding:8px 12px; margin-bottom:14px;">
-          🔗 Em thuộc <b>${esc(team.name)}</b> — mỗi vi phạm ghi ở đây sẽ <b>tự động trừ điểm tổ</b> trong đúng tháng của ngày vi phạm (xem tại Thi đua tổ/nhóm), không cần nhập lại.
+        <div class="tiny" style="background:var(--surface-alt); border-radius:14px; padding:9px 14px; margin-bottom:14px;">
+          🔗 Em thuộc <b>${esc(team.name)}</b> — mỗi đóng góp <b>tự động cộng</b>, mỗi vi phạm <b>tự động trừ</b> vào điểm tổ trong đúng tháng của ngày ghi nhận (xem tại Thi đua tổ/nhóm), không cần nhập lại.
         </div>` : `
-        <div class="tiny" style="background:var(--surface-alt); border-radius:8px; padding:8px 12px; margin-bottom:14px;">
-          ⚪ Em chưa được phân tổ, nên vi phạm ghi ở đây sẽ chưa trừ vào điểm tổ nào. Vào Thi đua tổ/nhóm để phân tổ nếu cần.
+        <div class="tiny" style="background:var(--surface-alt); border-radius:14px; padding:9px 14px; margin-bottom:14px;">
+          ⚪ Em chưa được phân tổ, nên điểm ghi ở đây chưa tính vào tổ nào. Vào Thi đua tổ/nhóm để phân tổ nếu cần.
         </div>`}
         <div style="border:1px solid var(--line); border-radius:8px; padding:14px; margin-bottom:18px; background:var(--surface-alt);">
-          <div style="font-weight:700; margin-bottom:10px; font-size:16px;">+ Ghi nhận vi phạm mới</div>
+          <div style="font-weight:700; margin-bottom:10px; font-size:16px;">+ Ghi nhận mới</div>
           <div style="display:flex; gap:8px; margin-bottom:10px; flex-wrap:wrap;">
+            <div style="width:160px;"><label class="field-label">Loại</label>
+              <select id="violation-type"><option value="v">⚠ Vi phạm (trừ)</option><option value="c">⭐ Đóng góp (cộng)</option></select></div>
             <div style="width:150px;"><label class="field-label">Ngày</label><input type="date" id="violation-date" value="${todayISO()}"></div>
-            <div style="width:110px;"><label class="field-label">Điểm trừ</label><input type="number" id="violation-points" value="5" min="0" step="1"></div>
-            <div style="flex:1; min-width:220px;"><label class="field-label">Nội dung vi phạm</label><input type="text" id="violation-content" placeholder="VD: Nói chuyện riêng trong giờ học..."></div>
+            <div style="width:100px;"><label class="field-label">Điểm</label><input type="number" id="violation-points" value="5" min="0" step="1"></div>
+            <div style="flex:1; min-width:220px;"><label class="field-label">Nội dung</label><input type="text" id="violation-content" placeholder="VD: Nói chuyện riêng / Giúp bạn bài khó, phát biểu tốt..."></div>
           </div>
           <div style="text-align:right;">
             <button class="btn btn-accent btn-sm" data-action="add-violation" data-class="${classId}" data-student="${studentId}">+ Ghi nhận (Enter)</button>
@@ -3833,25 +3848,28 @@ function renderViolationsSection(classId, cls){
         ${log.length? log.map(v=>`
           <div style="border-bottom:1px solid var(--line); padding:10px 0; display:flex; justify-content:space-between; gap:10px;">
             <div>
-              <b>${fmtDateVN(v.date)}</b> <span class="tiny mono" style="color:var(--danger);">− ${v.points!==undefined?v.points:5} điểm</span>
+              <b>${fmtDateVN(v.date)}</b>
+              ${v.kind==='c'
+                ? `<span class="tiny mono" style="color:var(--success);font-weight:700;">⭐ Đóng góp + ${v.points} điểm</span>`
+                : `<span class="tiny mono" style="color:var(--danger);font-weight:700;">⚠ Vi phạm − ${v.points} điểm</span>`}
               <div class="note-text" style="margin-top:4px;">${esc(v.content)}</div>
-              ${team? `<div class="tiny" style="margin-top:3px;color:var(--ink-faint);">→ Đã trừ vào điểm ${esc(team.name)}, tháng ${monthLabel(monthKey(v.date))}</div>` : ''}
+              ${team? `<div class="tiny" style="margin-top:3px;color:var(--ink-faint);">→ Đã ${v.kind==='c'?'cộng vào':'trừ vào'} điểm ${esc(team.name)}, ${monthLabel(monthKey(v.date))}</div>` : ''}
             </div>
-            <button class="btn btn-danger-outline btn-sm" data-action="delete-violation" data-class="${classId}" data-student="${studentId}" data-entry="${v.id}">Xoá</button>
-          </div>`).join('') : `<div class="muted">Chưa có vi phạm nào được ghi nhận cho học sinh này.</div>`}
+            <button class="btn btn-danger-outline btn-sm" data-action="delete-violation" data-class="${classId}" data-student="${studentId}" data-entry="${v.id}" data-kind="${v.kind}">Xoá</button>
+          </div>`).join('') : `<div class="muted">Chưa có ghi nhận nào cho học sinh này.</div>`}
       </div>
     `;
   }
   const rows = cls.students.map(s=>{
-    const log = (s.violations||[]).slice().sort((a,b)=> b.date.localeCompare(a.date));
-    const totalPoints = log.reduce((a,b)=> a+(b.points!==undefined?b.points:5), 0);
-    return {id:s.id, name:s.name, count: log.length, totalPoints, last: log[0]};
+    const t = studentMeritTotals(s);
+    const last = studentMeritLog(s)[0];
+    return {id:s.id, name:s.name, count:t.vCount, cCount:t.cCount, net:t.net, last};
   });
   const sortKey = state.violationsSort || 'count-desc';
   const [sortField, sortDir] = sortKey.split('-');
   const sorted = rows.slice().sort((a,b)=>{
-    const va = sortField==='points' ? a.totalPoints : a.count;
-    const vb = sortField==='points' ? b.totalPoints : b.count;
+    const va = sortField==='points' ? a.net : sortField==='contrib' ? a.cCount : a.count;
+    const vb = sortField==='points' ? b.net : sortField==='contrib' ? b.cCount : b.count;
     return sortDir==='asc' ? va-vb : vb-va;
   });
   return `
@@ -3861,21 +3879,24 @@ function renderViolationsSection(classId, cls){
         <select data-action="violations-change-sort" style="width:auto;">
           <option value="count-desc" ${sortKey==='count-desc'?'selected':''}>Số lần vi phạm: Cao → Thấp</option>
           <option value="count-asc" ${sortKey==='count-asc'?'selected':''}>Số lần vi phạm: Thấp → Cao</option>
-          <option value="points-desc" ${sortKey==='points-desc'?'selected':''}>Điểm bị trừ: Cao → Thấp</option>
-          <option value="points-asc" ${sortKey==='points-asc'?'selected':''}>Điểm bị trừ: Thấp → Cao</option>
+          <option value="contrib-desc" ${sortKey==='contrib-desc'?'selected':''}>Số lần đóng góp: Cao → Thấp</option>
+          <option value="contrib-asc" ${sortKey==='contrib-asc'?'selected':''}>Số lần đóng góp: Thấp → Cao</option>
+          <option value="points-desc" ${sortKey==='points-desc'?'selected':''}>Điểm ròng: Cao → Thấp</option>
+          <option value="points-asc" ${sortKey==='points-asc'?'selected':''}>Điểm ròng: Thấp → Cao</option>
         </select>
       </div>
-      <table><thead><tr><th>Học sinh</th><th style="text-align:center;">Số lần vi phạm</th><th style="text-align:center;">Tổng điểm bị trừ</th><th>Lần gần nhất</th><th></th></tr></thead><tbody>
+      <table><thead><tr><th>Học sinh</th><th style="text-align:center;">Đóng góp</th><th style="text-align:center;">Vi phạm</th><th style="text-align:center;">Điểm ròng</th><th>Lần gần nhất</th><th></th></tr></thead><tbody>
       ${sorted.map(r=>`
         <tr class="ledger ${r.count>=3?'flagged':''}" style="cursor:pointer;" data-action="violations-select" data-student="${r.id}">
           <td>${esc(r.name)}</td>
-          <td class="mono" style="text-align:center;">${r.count}</td>
-          <td class="mono" style="text-align:center;color:${r.totalPoints>0?'var(--danger)':'var(--ink-soft)'};">${r.totalPoints>0? '−'+r.totalPoints : '—'}</td>
+          <td class="mono" style="text-align:center;color:${r.cCount>0?'var(--success)':'var(--ink-soft)'};">${r.cCount||'—'}</td>
+          <td class="mono" style="text-align:center;color:${r.count>0?'var(--danger)':'var(--ink-soft)'};">${r.count||'—'}</td>
+          <td class="mono" style="text-align:center;font-weight:700;color:${r.net>0?'var(--success)':r.net<0?'var(--danger)':'var(--ink-soft)'};">${r.net>0?'+'+r.net : r.net<0?'−'+Math.abs(r.net) : '—'}</td>
           <td class="mono">${r.last? fmtDateVN(r.last.date) : '—'}</td>
           <td style="text-align:right;"><button class="btn btn-outline btn-sm" data-action="violations-select" data-student="${r.id}">Xem / Thêm</button></td>
         </tr>`).join('')}
       </tbody></table>
-      <div class="tiny" style="margin-top:8px;">Các dòng tô đỏ là học sinh có từ 3 lần vi phạm trở lên.</div>
+      <div class="tiny" style="margin-top:8px;">Điểm ròng = tổng điểm đóng góp − tổng điểm vi phạm, cũng là phần học sinh góp vào điểm tổ. Dòng tô đỏ là học sinh có từ 3 lần vi phạm trở lên.</div>
     </div>
   `;
 }
@@ -3993,7 +4014,7 @@ function getTeamSettings(cls){
 function getTeamMonthsAvailable(classId){
   const cls = getClass(classId);
   const keys = new Set([todayISO().slice(0,7)]);
-  (cls.students||[]).forEach(s=> (s.violations||[]).forEach(v=> keys.add(monthKey(v.date))));
+  (cls.students||[]).forEach(s=> { (s.violations||[]).forEach(v=> keys.add(monthKey(v.date))); (s.contributions||[]).forEach(v=> keys.add(monthKey(v.date))); });
   (cls.teamScores||[]).forEach(e=> keys.add(monthKey(e.date)));
   return Array.from(keys).sort();
 }
@@ -4006,6 +4027,10 @@ function computeTeamMonthScore(classId, teamId, monthKey_){
   members.forEach(s=> (s.violations||[]).forEach(v=>{
     if(monthKey(v.date)===monthKey_){ violationCount++; violationDeduction += (v.points!==undefined ? v.points : 5); }
   }));
+  let contribCount = 0, contribBonus = 0;
+  members.forEach(s=> (s.contributions||[]).forEach(c=>{
+    if(monthKey(c.date)===monthKey_){ contribCount++; contribBonus += (c.points!==undefined ? c.points : 5); }
+  }));
   let activityBonus = 0, activityCount = 0;
   members.forEach(s=> (s.activities||[]).forEach(a=>{
     if(monthKey(a.date)===monthKey_){ activityCount++; activityBonus += (a.points!==undefined ? a.points : (a.level||0)); }
@@ -4014,10 +4039,10 @@ function computeTeamMonthScore(classId, teamId, monthKey_){
   const manualBonus = manualEntries.filter(e=>e.points>0).reduce((a,b)=>a+b.points,0);
   const manualPenalty = manualEntries.filter(e=>e.points<0).reduce((a,b)=>a+Math.abs(b.points),0);
   const manualSum = manualBonus - manualPenalty;
-  const totalBonus = manualBonus + activityBonus;
+  const totalBonus = manualBonus + activityBonus + contribBonus;
   const totalPenalty = violationDeduction + manualPenalty;
   const score = settings.baseScore + totalBonus - totalPenalty;
-  return { score, base: settings.baseScore, violationCount, violationDeduction, activityCount, activityBonus, manualSum, manualBonus, manualPenalty, totalBonus, totalPenalty, manualEntries };
+  return { score, base: settings.baseScore, violationCount, violationDeduction, contribCount, contribBonus, activityCount, activityBonus, manualSum, manualBonus, manualPenalty, totalBonus, totalPenalty, manualEntries };
 }
 // Học sinh "tích cực" trong tháng: tổng điểm cộng từ hoạt động phong trào trong tháng đạt ngưỡng
 function isStudentActiveThisMonth(student, monthKey_){
@@ -4045,7 +4070,7 @@ function buildTeamRosterPrompt(classId, teamId, monthKey_){
   L.push('');
   L.push('=== KẾT QUẢ THI ĐUA THÁNG NÀY ===');
   L.push(`Điểm khởi điểm: ${result.base}`);
-  L.push(`Điểm cộng: +${result.totalBonus} (trong đó ${result.activityCount} lượt hoạt động phong trào +${result.activityBonus}, thưởng thủ công +${result.manualBonus})`);
+  L.push(`Điểm cộng: +${result.totalBonus} (trong đó ${result.contribCount} lượt đóng góp của học sinh +${result.contribBonus}, ${result.activityCount} lượt hoạt động phong trào +${result.activityBonus}, thưởng cả tổ +${result.manualBonus})`);
   L.push(`Điểm trừ (vi phạm + phạt): −${result.totalPenalty} (trong đó ${result.violationCount} lượt vi phạm)`);
   L.push(`Tổng điểm tháng này: ${result.score}`);
   L.push(`So với tháng trước (${prevResult.score}): ${result.score-prevResult.score>=0?'+':''}${result.score-prevResult.score}`);
@@ -4124,7 +4149,7 @@ function buildTeamsMonthReportPrompt(classId, monthKey_){
   results.forEach((t,i)=>{
     const deltaText = t.delta===null ? 'chưa có dữ liệu tháng trước' : `${t.delta>=0?'+':''}${t.delta} so với tháng trước`;
     L.push(`${i+1}. ${t.name} — Điểm cuối tháng: ${t.cur.score} (${deltaText})`);
-    L.push(`   + Điểm cộng: +${t.cur.totalBonus} (hoạt động phong trào: ${t.cur.activityCount} lượt / +${t.cur.activityBonus}; thưởng thủ công: +${t.cur.manualBonus})`);
+    L.push(`   + Điểm cộng: +${t.cur.totalBonus} (đóng góp học sinh: ${t.cur.contribCount} lượt / +${t.cur.contribBonus}; hoạt động phong trào: ${t.cur.activityCount} lượt / +${t.cur.activityBonus}; thưởng cả tổ: +${t.cur.manualBonus})`);
     L.push(`   − Điểm trừ: −${t.cur.totalPenalty} (vi phạm: ${t.cur.violationCount} lỗi / −${t.cur.violationDeduction}; phạt thủ công: −${t.cur.manualPenalty})`);
   });
   L.push('');
@@ -4186,7 +4211,7 @@ function renderTeamsSection(classId, cls){
           </td>
         </tr>`).join('')}
       </tbody></table>
-      <div class="tiny" style="margin-bottom:14px;">Điểm tháng này = ${settings.baseScore} (khởi điểm) + Điểm cộng − Điểm trừ. Điểm trừ gồm vi phạm tự động + phạt thủ công; Điểm cộng gồm hoạt động phong trào tự động (mức nhiệt tình = điểm) + thưởng thủ công.</div>
+      <div class="tiny" style="margin-bottom:14px;">Điểm tháng này = ${settings.baseScore} (khởi điểm) + Điểm cộng − Điểm trừ. Điểm cộng gồm đóng góp của học sinh + hoạt động phong trào (tự động) + thưởng cả tổ nhập tay. Điểm trừ gồm vi phạm của học sinh (tự động) + phạt cả tổ nhập tay.</div>
       ` : `<div class="muted" style="margin-bottom:14px;">Chưa có tổ/nhóm nào — tạo bên dưới.</div>`}
 
       <div style="display:flex; gap:8px; margin-bottom:18px; max-width:420px;">
@@ -4195,7 +4220,7 @@ function renderTeamsSection(classId, cls){
       </div>
 
       ${teams.length? `
-      <div style="font-weight:700; margin-bottom:10px; font-size:16px;">+ Điều chỉnh điểm (thưởng / phạt thêm trong tháng)</div>
+      <div style="font-weight:700; margin-bottom:10px; font-size:16px;">+ Thưởng / trừ điểm cả tổ</div>
       <div style="display:flex; gap:8px; margin-bottom:10px; flex-wrap:wrap; align-items:flex-end;">
         <div style="width:130px;"><label class="field-label">Tổ</label><select id="score-team-select">${teams.map(t=>`<option value="${t.id}">${esc(t.name)}</option>`).join('')}</select></div>
         <div style="width:100px;"><label class="field-label">Điểm (±)</label><input type="number" id="score-points" step="1" placeholder="5 / -3"></div>
@@ -4210,7 +4235,7 @@ function renderTeamsSection(classId, cls){
     <div class="card">
       <div class="card-title">Phân tổ học sinh</div>
       <div class="muted" style="margin-bottom:10px;">⭐ cạnh tên = thành viên tích cực trong tháng (tổng điểm cộng từ hoạt động phong trào ≥ 8).</div>
-      <table><thead><tr><th>Học sinh</th><th>Tổ</th><th style="text-align:center;">Hạng tổ</th><th class="no-print" style="width:110px;">Thao tác</th></tr></thead><tbody>
+      <table><thead><tr><th>Học sinh</th><th>Tổ</th><th style="text-align:center;">Hạng tổ</th></tr></thead><tbody>
       ${cls.students.map(s=>{
         const rank = s.teamId ? results.findIndex(t=>t.id===s.teamId)+1 : 0;
         const active = isStudentActiveThisMonth(s, month);
@@ -4224,9 +4249,6 @@ function renderTeamsSection(classId, cls){
             </select>
           </td>
           <td class="mono" style="text-align:center;">${rank? (medal[rank-1]||('#'+rank)) : '—'}</td>
-          <td class="no-print">
-            ${s.teamId ? `<button class="btn btn-outline btn-sm" title="Cộng/trừ điểm tổ qua học sinh này" data-action="quick-add-team-score" data-class="${classId}" data-student="${s.id}">± Điểm tổ</button>` : `<span class="tiny muted">Chưa có tổ</span>`}
-          </td>
         </tr>`;
       }).join('')}
       </tbody></table>
@@ -6479,26 +6501,31 @@ async function handleAction(action, elx, e){
       const dateEl = document.getElementById('violation-date');
       const pointsEl = document.getElementById('violation-points');
       const contentEl = document.getElementById('violation-content');
+      const typeEl = document.getElementById('violation-type');
+      const kind = typeEl && typeEl.value==='c' ? 'c' : 'v';
       const content = contentEl ? contentEl.value.trim() : '';
-      if(!content){ showToast('Nhập nội dung vi phạm trước khi lưu nhé.'); break; }
+      if(!content){ showToast('Nhập nội dung trước khi lưu nhé.'); break; }
       const points = pointsEl ? Math.max(0, Number(pointsEl.value)||0) : 5;
       const cls = getClass(classId);
       const st = cls && cls.students.find(s=>s.id===studentId);
       if(st){
-        if(!st.violations) st.violations = [];
-        st.violations.push({id: uid(), date: dateEl && dateEl.value ? dateEl.value : todayISO(), content, points});
+        const entry = {id: uid(), date: dateEl && dateEl.value ? dateEl.value : todayISO(), content, points};
+        if(kind==='c'){ if(!st.contributions) st.contributions = []; st.contributions.push(entry); }
+        else { if(!st.violations) st.violations = []; st.violations.push(entry); }
         render(); saveClasses();
-        showToast('Đã ghi nhận vi phạm.');
+        showToast(kind==='c' ? 'Đã ghi nhận đóng góp (+'+points+' điểm tổ).' : 'Đã ghi nhận vi phạm (−'+points+' điểm tổ).');
+        if(kind==='c'){ const t=document.getElementById('violation-type'); if(t) t.value='c'; }
         setTimeout(()=>{ const i=document.getElementById('violation-content'); if(i) i.focus(); }, 0);
       }
       break;
     }
     case 'delete-violation': {
-      const classId = elx.dataset.class, studentId = elx.dataset.student, entryId = elx.dataset.entry;
-      openConfirmModal('Xoá lần vi phạm này khỏi lịch sử?', true, ()=>{
+      const classId = elx.dataset.class, studentId = elx.dataset.student, entryId = elx.dataset.entry, kind = elx.dataset.kind;
+      openConfirmModal(kind==='c' ? 'Xoá lần đóng góp này khỏi lịch sử?' : 'Xoá lần vi phạm này khỏi lịch sử?', true, ()=>{
         const cls = getClass(classId);
         const st = cls && cls.students.find(s=>s.id===studentId);
-        if(st && st.violations){ st.violations = st.violations.filter(v=>v.id!==entryId); }
+        if(st && kind==='c' && st.contributions){ st.contributions = st.contributions.filter(v=>v.id!==entryId); }
+        else if(st && st.violations){ st.violations = st.violations.filter(v=>v.id!==entryId); }
         render(); saveClasses();
       });
       break;
