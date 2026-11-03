@@ -2211,10 +2211,12 @@ function buildSessionInfographicPrompt(classId, date, scoreMode){
   L.push('Bạn là trợ lý tạo INFOGRAPHIC BÁO CÁO TỔNG KẾT BUỔI HỌC gửi phụ huynh, dùng đúng số liệu dưới đây, không bịa thêm.');
   L.push('');
   L.push('=== DỮ LIỆU ===');
-  L.push(`Lớp: ${cls.name} · Ngày: ${fmtDateVN(date)} · GV: ${state.teacherName || '(chưa nhập)'}`);
+  L.push(`Lớp: ${cls.name} · Ngày: ${fmtDateVN(date)}`);
+  const signName = (state.teacherName || '').trim() || 'Nguyễn Thị Hồng Hạnh';
   L.push(`Nội dung bài học: ${session.content || '(chưa nhập)'}`);
   L.push(`BTVN giao: ${session.homework || '(chưa nhập)'}`);
   if(hasNote) L.push(`Lưu ý cho buổi học: ${session.generalNote.trim()}`);
+  L.push(`Chữ ký cuối trang (KHÔNG ghi ở đầu trang): "Giáo viên" — ${signName}`);
   L.push('');
 
   const absentees = students.map(st=>({name:st.name, status:session.attendance[st.id]})).filter(x=>x.status==='absent'||x.status==='late');
@@ -2259,13 +2261,11 @@ function buildSessionInfographicPrompt(classId, date, scoreMode){
         L.push('Điểm đầy đủ của cả lớp (liệt kê TẤT CẢ học sinh):');
         L.push(scored.map(x=>`${x.name}: ${x.score.toFixed(1)}`).join(' · '));
       } else {
-        // Chỉ hiện học sinh điểm cao (điểm >8, hoặc Top 5 cao nhất lớp — tính cả đồng điểm ở mốc thứ 5)
-        const sortedDesc = scored.slice().sort((a,b)=>b.score-a.score);
-        const top5CutoffScore = sortedDesc.length ? sortedDesc[Math.min(4, sortedDesc.length-1)].score : null;
-        const topScorers = scored.filter(x=> x.score>8 || (top5CutoffScore!==null && x.score>=top5CutoffScore));
+        // Chỉ hiện đúng Top 5 học sinh điểm cao nhất lớp (đồng điểm ở hạng 5 thì lấy theo thứ tự danh sách lớp)
+        const topScorers = scored.slice().sort((a,b)=>b.score-a.score).slice(0,5);
 
-        L.push('Học sinh điểm cao (điểm >8 hoặc Top 5 cao nhất lớp) — chỉ liệt kê đúng những em này kèm điểm, các em khác không hiện tên/điểm:');
-        L.push(topScorers.length ? topScorers.map(x=>`${x.name}: ${x.score.toFixed(1)}`).join(' · ') : '(Không có học sinh nào đạt mốc điểm cao cho bài này.)');
+        L.push('Top 5 học sinh điểm cao nhất lớp (xếp từ cao xuống thấp) — chỉ liệt kê đúng 5 em này kèm điểm, các em khác không hiện tên/điểm:');
+        L.push(topScorers.length ? topScorers.map(x=>`${x.name}: ${x.score.toFixed(1)}`).join(' · ') : '(Chưa có điểm.)');
       }
 
       const max = Math.max(...scored.map(x=>x.score)), min = Math.min(...scored.map(x=>x.score));
@@ -2285,18 +2285,19 @@ function buildSessionInfographicPrompt(classId, date, scoreMode){
 
   L.push('');
   L.push('=== YÊU CẦU THIẾT KẾ ===');
-  L.push('Flat design hiện đại, dọc khổ A4, font Arial toàn bộ. Tông màu chủ đạo: XANH DƯƠNG, có hiệu ứng GRADIENT xuyên suốt toàn ảnh (không dùng màu xanh phẳng đơn sắc) — nền tổng thể là gradient xanh nhạt (từ #EAF1FF phía trên chuyển dần xuống #F7F9FC phía dưới); mỗi card/section cũng có điểm nhấn gradient xanh (VD dải màu mỏng phía trên card, khung icon nền gradient #3B5FE0→#2947C0, hoặc viền gradient nhẹ) thay vì icon/viền màu xanh phẳng 1 tông. Bố cục linh hoạt theo nội dung thật: mục ít thông tin (VD không ai vắng, không ai thiếu bài) thì thu gọn, không để trống lãng phí; mục nhiều thông tin thì đủ chỗ hiển thị, không ép chật — không chia đều diện tích cố định theo khung mẫu. Gói gọn trong 1 trang, padding vừa phải, bo góc 12-16px, bóng đổ mềm.');
+  L.push('Flat design hiện đại, dọc khổ A4, font Arial toàn bộ. Tông màu chủ đạo: XANH NGỌC (teal/turquoise — tuyệt đối KHÔNG dùng màu xanh dương (blue), tím hay chàm), có hiệu ứng GRADIENT xuyên suốt toàn ảnh (không dùng màu xanh phẳng đơn sắc) — nền tổng thể là gradient xanh nhạt (từ #E6F7F5 phía trên chuyển dần xuống #F6FBFA phía dưới); mỗi card/section cũng có điểm nhấn gradient xanh (VD dải màu mỏng phía trên card, khung icon nền gradient #41BFB6→#1F8A82, hoặc viền gradient nhẹ) thay vì icon/viền màu xanh phẳng 1 tông. Bố cục linh hoạt theo nội dung thật: mục ít thông tin (VD không ai vắng, không ai thiếu bài) thì thu gọn, không để trống lãng phí; mục nhiều thông tin thì đủ chỗ hiển thị, không ép chật — không chia đều diện tích cố định theo khung mẫu. Điểm nhấn phụ rất tiết chế bằng đỏ san hô #E5484D (chỉ dùng cho viền badge ngày và một đường kẻ mảnh dưới tiêu đề). Gói gọn trong 1 trang, padding vừa phải, bo góc 12-16px, bóng đổ mềm.');
   L.push('');
-  L.push('HEADER: nền gradient xanh dương đậm (#3B5FE0→#2947C0), tiêu đề "BÁO CÁO TỔNG KẾT BUỔI HỌC" hoa đậm trắng. Dòng phụ: icon sách + "Môn học: Tiếng Anh", icon GV + tên GV. Góc phải: badge tròn trắng icon lịch + ngày.');
+  L.push('HEADER: nền gradient xanh ngọc đậm (#41BFB6→#1F8A82), tiêu đề "BÁO CÁO TỔNG KẾT BUỔI HỌC" hoa đậm trắng. Dòng phụ: icon sách + "Môn học: Tiếng Anh" (KHÔNG ghi tên giáo viên ở header). Góc phải: badge tròn trắng icon lịch + ngày.');
   L.push('SECTION 1 "NỘI DUNG BÀI HỌC": card trắng bo góc, dải/icon nhấn gradient xanh, danh sách gạch đầu dòng, từ khóa in đậm.');
   if(hasNote) L.push('SECTION "LƯU Ý BUỔI HỌC" (chỉ thêm mục này vì có nội dung): card trắng nhỏ gọn, icon 📌 nền gradient xanh, danh sách gạch đầu dòng ngắn.');
   L.push('SECTION "NỀN NẾP & Ý THỨC" / "BÀI TẬP VỀ NHÀ": 2 cột song song, chiều cao mỗi cột co giãn tự do theo nội dung (không cố định bằng nhau). Cột trái: icon mặt trời nền gradient xanh, chỉ liệt kê HS vắng/muộn dạng pill (đỏ nhạt "Vắng", cam "Muộn"); trống thì hiện "Cả lớp có mặt đầy đủ 🎉". Cột phải: icon cây bút nền gradient xanh, gồm 2 phần rõ rệt — (1) "Còn thiếu": trình bày theo từng đầu mục loại bài thiếu (tên loại bài làm tiêu đề nhỏ đậm), tên HS thiếu bài đó xếp thành pill cam ngay dưới, trống thì bỏ qua phần này; (2) ngay bên dưới, tiêu đề nhỏ "✅ Hoàn thành đầy đủ" — liệt kê tên các học sinh làm đủ tất cả bài (dạng pill xanh lá nhạt), lấy đúng danh sách "Học sinh hoàn thành ĐỦ tất cả bài tập" ở phần DỮ LIỆU; nếu rỗng thì bỏ qua phần này.');
   if(showFull){
-    L.push('SECTION "KẾT QUẢ BÀI KIỂM TRA/LUYỆN TẬP": icon bia bắn. Với mỗi đầu điểm: 1 bảng đầy đủ 2 cột "Họ và tên" | "Điểm" liệt kê TẤT CẢ học sinh trong lớp, TẤT CẢ điểm cùng 1 màu xanh dương đậm #2947C0 (không phân cấp màu theo mức điểm). Dưới mỗi bảng điểm có 3 badge nhỏ nền gradient xanh nhạt (VD #EAF1FF→#DCE8FF): "🏆 Cao nhất: [điểm] — [tên]", "📉 Thấp nhất: [điểm] — [tên]", "📊 TB lớp: [điểm]" (chữ điểm giữ màu xanh dương đậm #2947C0 phẳng để dễ đọc, chỉ nền badge là gradient). Nhiều đầu điểm thì xếp thành các khối liền nhau. SAU CÙNG — khi đã hết toàn bộ các đầu điểm, thêm 1 khung riêng biệt DUY NHẤT (không lặp lại theo từng bài), nền nhạt khác màu để phân biệt, tiêu đề nhỏ "📝 Ghi chú của giáo viên", nội dung lấy đúng từ dòng "Ghi chú của giáo viên" ở phần DỮ LIỆU; nếu rỗng thì bỏ qua cả khung này.');
+    L.push('SECTION "KẾT QUẢ BÀI KIỂM TRA/LUYỆN TẬP": icon bia bắn. Với mỗi đầu điểm: 1 bảng đầy đủ 2 cột "Họ và tên" | "Điểm" liệt kê TẤT CẢ học sinh trong lớp, TẤT CẢ điểm cùng 1 màu xanh ngọc đậm #1F7A73 (không phân cấp màu theo mức điểm). Dưới mỗi bảng điểm có 3 badge nhỏ nền gradient xanh nhạt (VD #E3F6F4→#C9EDE8): "🏆 Cao nhất: [điểm] — [tên]", "📉 Thấp nhất: [điểm] — [tên]", "📊 TB lớp: [điểm]" (chữ điểm giữ màu xanh ngọc đậm #1F7A73 phẳng để dễ đọc, chỉ nền badge là gradient). Nhiều đầu điểm thì xếp thành các khối liền nhau. SAU CÙNG — khi đã hết toàn bộ các đầu điểm, thêm 1 khung riêng biệt DUY NHẤT (không lặp lại theo từng bài), nền nhạt khác màu để phân biệt, tiêu đề nhỏ "📝 Ghi chú của giáo viên", nội dung lấy đúng từ dòng "Ghi chú của giáo viên" ở phần DỮ LIỆU; nếu rỗng thì bỏ qua cả khung này.');
   } else {
-    L.push('SECTION "KẾT QUẢ BÀI KIỂM TRA/LUYỆN TẬP": icon bia bắn. Ngay dưới tiêu đề section, thêm 1 dòng phụ đề nhỏ, chữ nghiêng, màu xám xanh nhạt: "Cô đính kèm một số bài đạt điểm tốt trong lớp". QUAN TRỌNG — vì lý do bảo mật điểm số của trung tâm, KHÔNG được liệt kê điểm của toàn bộ học sinh, chỉ hiển thị đúng danh sách học sinh điểm cao đã cho trong phần DỮ LIỆU. Với mỗi đầu điểm: 1 bảng gọn 2 cột "Họ và tên" | "Điểm", TẤT CẢ điểm cùng 1 màu xanh dương đậm #2947C0 (không phân cấp màu theo mức điểm); nếu danh sách rỗng thì bỏ qua bảng đó, chỉ hiện phần tổng kết. Dưới mỗi bảng điểm có 3 badge nhỏ nền gradient xanh nhạt (VD #EAF1FF→#DCE8FF): "🏆 Cao nhất: [điểm] — [tên học sinh đạt điểm đó]" (BẮT BUỘC ghi tên, lấy đúng tên trong phần DỮ LIỆU), "📉 Thấp nhất: [điểm]" (CHỈ ghi điểm số, TUYỆT ĐỐI KHÔNG ghi tên học sinh nào ở badge này), "📊 TB lớp: [điểm]" (chữ điểm giữ màu xanh dương đậm #2947C0 phẳng để dễ đọc, chỉ nền badge là gradient). Nhiều đầu điểm thì xếp thành các khối liền nhau. SAU CÙNG — khi đã hết toàn bộ các đầu điểm, thêm 1 khung riêng biệt DUY NHẤT (không lặp lại theo từng bài), nền nhạt khác màu để phân biệt, tiêu đề nhỏ "📝 Ghi chú của giáo viên", nội dung lấy đúng từ dòng "Ghi chú của giáo viên" ở phần DỮ LIỆU; nếu rỗng thì bỏ qua cả khung này. TUYỆT ĐỐI KHÔNG tự thêm tên/điểm của học sinh nào ngoài danh sách đã cho, kể cả khi biết điểm của họ qua phần tổng kết.');
+    L.push('SECTION "KẾT QUẢ BÀI KIỂM TRA/LUYỆN TẬP": icon bia bắn. Ngay dưới tiêu đề section, thêm 1 dòng phụ đề nhỏ, chữ nghiêng, màu xám xanh nhạt: "Cô đính kèm một số bài đạt điểm tốt trong lớp". QUAN TRỌNG — vì lý do bảo mật điểm số của trung tâm, KHÔNG được liệt kê điểm của toàn bộ học sinh, chỉ hiển thị đúng Top 5 học sinh điểm cao nhất đã cho trong phần DỮ LIỆU. Với mỗi đầu điểm: 1 bảng gọn 2 cột "Họ và tên" | "Điểm", TẤT CẢ điểm cùng 1 màu xanh ngọc đậm #1F7A73 (không phân cấp màu theo mức điểm); nếu danh sách rỗng thì bỏ qua bảng đó, chỉ hiện phần tổng kết. Dưới mỗi bảng điểm có 3 badge nhỏ nền gradient xanh nhạt (VD #E3F6F4→#C9EDE8): "🏆 Cao nhất: [điểm] — [tên học sinh đạt điểm đó]" (BẮT BUỘC ghi tên, lấy đúng tên trong phần DỮ LIỆU), "📉 Thấp nhất: [điểm]" (CHỈ ghi điểm số, TUYỆT ĐỐI KHÔNG ghi tên học sinh nào ở badge này), "📊 TB lớp: [điểm]" (chữ điểm giữ màu xanh ngọc đậm #1F7A73 phẳng để dễ đọc, chỉ nền badge là gradient). Nhiều đầu điểm thì xếp thành các khối liền nhau. SAU CÙNG — khi đã hết toàn bộ các đầu điểm, thêm 1 khung riêng biệt DUY NHẤT (không lặp lại theo từng bài), nền nhạt khác màu để phân biệt, tiêu đề nhỏ "📝 Ghi chú của giáo viên", nội dung lấy đúng từ dòng "Ghi chú của giáo viên" ở phần DỮ LIỆU; nếu rỗng thì bỏ qua cả khung này. TUYỆT ĐỐI KHÔNG tự thêm tên/điểm của học sinh nào ngoài danh sách đã cho, kể cả khi biết điểm của họ qua phần tổng kết.');
   }
   L.push('FOOTER: chữ in nghiêng, canh giữa, xám nhạt: "Trân trọng cảm ơn Quý phụ huynh đã đồng hành cùng lớp học!"');
+  L.push('CHỮ KÝ (dưới cùng khổ A4, căn phải, bên dưới dòng cảm ơn): dòng chữ nhỏ "Giáo viên" (Arial, xám đậm), ngay dưới là tên "' + signName + '" viết như CHỮ KÝ TAY bằng font thư pháp/chữ ký (signature script, nét mảnh liền mạch, hơi nghiêng, cỡ lớn hơn chữ thường, màu xanh ngọc đậm #1F7A73), GIỮ ĐÚNG đủ dấu tiếng Việt. Không ghi tên giáo viên ở bất kỳ chỗ nào khác trong ảnh.');
   L.push('');
   L.push('Dùng đúng số liệu ở phần DỮ LIỆU (tên, điểm, điểm danh, mức hoàn thành bài) để điền vào đúng mục tương ứng, toàn bộ tiếng Việt có dấu, không lỗi chính tả.');
   return L.join('\n');
