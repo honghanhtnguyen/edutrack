@@ -225,6 +225,7 @@
 
   .tiny.score-computed{ color:var(--accent-deep); font-weight:700; font-size:14px; }
 
+  .punish-sel{ font-size:13px; padding:4px 6px; border-radius:8px; width:auto; min-width:130px; }
   /* ---------- Chuyển động nhẹ ---------- */
   @keyframes pageIn{ from{ opacity:0; transform:translateY(10px); } to{ opacity:1; transform:none; } }
   @keyframes chartReveal{ from{ clip-path:inset(0 100% 0 0); } to{ clip-path:inset(0 0 0 0); } }
@@ -844,16 +845,35 @@ function getClass(id){ return state.classes.find(c=>c.id===id); }
 function getStudents(classId){ const c = getClass(classId); return c ? c.students : []; }
 function getSessions(classId){ return (state.sessionsByClass[classId]||[]).slice().sort((a,b)=> a.date.localeCompare(b.date)); }
 
-// Học sinh có đang "nợ" chép phạt tính đến trước ngày `beforeDate` hay không:
-// duyệt các buổi trước đó theo thứ tự thời gian, giao chép phạt thì bật nợ, kiểm tra xong thì tắt nợ.
-function studentOwesPunishment(classId, studentId, beforeDate){
+// Chép phạt theo SỐ LẦN (mỗi từ/lỗi chép X lần, tối đa 5, nợ cũ + giao mới cộng dồn, trần 5).
+// punishmentAssigned[sid] = 1..5 (dữ liệu cũ: true = 1 lần)
+// punishmentDone[sid]     = true (kiểm tra: đủ) | số n (chưa đủ: mới chép được n lần, phần thiếu chuyển sang buổi sau)
+const PUNISH_MAX = 5;
+function punishAssignCount(v){ if(v===true) return 1; const n = Number(v)||0; return Math.max(0, Math.min(PUNISH_MAX, n)); }
+// Số lần chép phạt học sinh còn nợ TÍNH ĐẾN TRƯỚC ngày beforeDate. Trong 1 buổi: kiểm tra nợ cũ trước, rồi mới giao mới.
+function studentPunishmentOwed(classId, studentId, beforeDate){
   const sessions = getSessions(classId).filter(s=>s.date < beforeDate);
-  let owes = false;
+  let owed = 0;
   sessions.forEach(s=>{
-    if(s.punishmentAssigned && s.punishmentAssigned[studentId]) owes = true;
-    if(s.punishmentDone && s.punishmentDone[studentId]) owes = false;
+    const a = (s.punishmentAssigned||{})[studentId];
+    const d = (s.punishmentDone||{})[studentId];
+    if(a===true && d===true){ owed = 0; return; } // dữ liệu cũ: giao rồi tick Đã KT cùng buổi
+    if(d===true) owed = 0;
+    else if(typeof d==='number') owed = Math.max(0, owed - d);
+    owed = Math.min(PUNISH_MAX, owed + punishAssignCount(a));
   });
-  return owes;
+  return owed;
+}
+// Số lần còn nợ SAU buổi `date` (đã trừ phần kiểm tra ở buổi đó, chưa tính phần giao mới của buổi đó)
+function punishmentRemainingAfterCheck(classId, studentId, session){
+  const before = studentPunishmentOwed(classId, studentId, session.date);
+  const d = (session.punishmentDone||{})[studentId];
+  if(d===true) return 0;
+  if(typeof d==='number') return Math.max(0, before - d);
+  return before;
+}
+function studentOwesPunishment(classId, studentId, beforeDate){
+  return studentPunishmentOwed(classId, studentId, beforeDate) > 0;
 }
 function getPendingPunishments(classId, beforeDate){
   return getStudents(classId).filter(st=>studentOwesPunishment(classId, st.id, beforeDate));
@@ -1869,7 +1889,7 @@ function renderSession(){
         <div class="dot"></div>
         <div style="flex:1;">
           <div class="warn-title">📌 Cần kiểm tra chép phạt buổi này</div>
-          <div class="warn-detail">${pending.map(p=>esc(p.name)).join(', ')} — còn nợ chép phạt từ buổi trước. Tick cột "✅ Đã KT" ở bảng bên dưới khi đã nộp.</div>
+          <div class="warn-detail">${pending.map(p=>esc(p.name)+' ('+studentPunishmentOwed(state.currentClassId, p.id, state.session.date)+' lần)').join(', ')} — còn nợ chép phạt từ buổi trước. Chọn "✅ Đủ" hoặc "Chưa đủ" ở cột Chép phạt bên dưới khi kiểm tra.</div>
         </div>
       </div>` : ''}
 
@@ -1967,8 +1987,9 @@ function renderSession(){
           ${orderedStudents.map(st=>{
             const a = sess.attendance[st.id] || '';
             const owes = pendingSet[st.id] || false;
-            const done = !!(sess.punishmentDone||{})[st.id];
-            const assigned = !!(sess.punishmentAssigned||{})[st.id];
+            const owedN = owes ? studentPunishmentOwed(state.currentClassId, st.id, sess.date) : 0;
+            const doneV = (sess.punishmentDone||{})[st.id];
+            const assignedN = punishAssignCount((sess.punishmentAssigned||{})[st.id]);
             return `<tr class="ledger ${warnSet[st.id]||owes?'flagged':''}">
               <td><b>${esc(st.name)}</b></td>
               <td>
@@ -2010,8 +2031,16 @@ function renderSession(){
               `; })()}
               <td>
                 <div style="display:flex; flex-direction:column; gap:4px; font-size:12.5px;">
-                  ${owes? `<label style="display:flex;align-items:center;gap:4px;cursor:pointer;color:var(--danger);"><input type="checkbox" ${done?'checked':''} data-action="toggle-punishment-done" data-student="${st.id}"> Đã KT</label>` : ''}
-                  <label style="display:flex;align-items:center;gap:4px;cursor:pointer;" title="Giao chép phạt buổi này"><input type="checkbox" ${assigned?'checked':''} data-action="toggle-punishment-assign" data-student="${st.id}"> Giao mới</label>
+                  ${owes? `<div style="color:var(--danger);font-weight:700;">Nợ: chép ${owedN} lần</div>
+                  <select class="punish-sel" title="Kiểm tra chép phạt còn nợ" data-action="set-punishment-check" data-student="${st.id}">
+                    <option value="" ${doneV===undefined||doneV===false||doneV===null?'selected':''}>Chưa kiểm tra</option>
+                    <option value="full" ${doneV===true?'selected':''}>✅ Đủ</option>
+                    ${Array.from({length:owedN},(_,k)=>k).map(k=>`<option value="${k}" ${doneV===k?'selected':''}>Chưa đủ: chép ${k}/${owedN}</option>`).join('')}
+                  </select>` : ''}
+                  <select class="punish-sel" title="Giao chép phạt buổi này (số lần chép mỗi từ/lỗi, tổng nợ tối đa 5)" data-action="set-punishment-assign" data-student="${st.id}">
+                    <option value="0">Giao mới: —</option>
+                    ${[1,2,3,4,5].map(n=>`<option value="${n}" ${assignedN===n?'selected':''}>Giao mới: ${n} lần</option>`).join('')}
+                  </select>
                 </div>
               </td>
               <td><textarea rows="2" placeholder="Lưu ý riêng..." style="width:100%;min-width:260px;resize:vertical;white-space:pre-wrap;" data-action="set-note" data-student="${st.id}">${esc(sess.studentNotes[st.id]||'')}</textarea></td>
@@ -2204,110 +2233,65 @@ function buildSessionInfographicPrompt(classId, date, scoreMode){
   const students = cls.students;
   const types = session.exerciseTypes || [];
   const exercises = session.exercises || [];
-  const hasNote = !!(session.generalNote && session.generalNote.trim());
   const showFull = scoreMode === 'full';
+  const signName = (state.teacherName || '').trim() || 'Nguyễn Thị Hồng Hạnh';
+  const isAbsent = st => session.attendance[st.id]==='absent';
 
   const L = [];
-  L.push('Bạn là trợ lý tạo INFOGRAPHIC BÁO CÁO TỔNG KẾT BUỔI HỌC gửi phụ huynh, dùng đúng số liệu dưới đây, không bịa thêm.');
+  L.push('Tạo cho tôi 1 file PDF khổ A4 dọc, đúng 1 trang: "BÁO CÁO TỔNG KẾT BUỔI HỌC" môn Tiếng Anh gửi phụ huynh. Chỉ dùng dữ liệu dưới đây, không bịa thêm, tiếng Việt đủ dấu.');
   L.push('');
-  L.push('=== DỮ LIỆU ===');
-  L.push(`Lớp: ${cls.name} · Ngày: ${fmtDateVN(date)}`);
-  const signName = (state.teacherName || '').trim() || 'Nguyễn Thị Hồng Hạnh';
-  L.push(`Nội dung bài học: ${session.content || '(chưa nhập)'}`);
-  L.push(`BTVN giao: ${session.homework || '(chưa nhập)'}`);
-  if(hasNote) L.push(`Lưu ý cho buổi học: ${session.generalNote.trim()}`);
-  L.push(`Chữ ký cuối trang (KHÔNG ghi ở đầu trang): "Giáo viên" — ${signName}`);
-  L.push('');
+  L.push('DỮ LIỆU');
+  L.push(`- Lớp ${cls.name} · Ngày ${fmtDateVN(date)}`);
+  L.push(`- Nội dung bài học: ${session.content || '(chưa nhập)'}`);
+  L.push(`- BTVN: ${session.homework || '(chưa nhập)'}`);
+  if(session.generalNote && session.generalNote.trim()) L.push(`- Lưu ý buổi học: ${session.generalNote.trim()}`);
+  if(session.disciplineNote && session.disciplineNote.trim()) L.push(`- Nền nếp: ${session.disciplineNote.trim()}`);
 
-  const absentees = students.map(st=>({name:st.name, status:session.attendance[st.id]})).filter(x=>x.status==='absent'||x.status==='late');
-  L.push('Điểm danh (chỉ ghi học sinh vắng/muộn, còn lại mặc định có mặt):');
-  L.push(absentees.length ? absentees.map(x=>`${x.name} (${x.status==='absent'?'Vắng':'Muộn'})`).join(', ') : 'Cả lớp có mặt đầy đủ.');
+  const abs = students.filter(st=>['absent','late'].includes(session.attendance[st.id])).map(st=>`${st.name} (${session.attendance[st.id]==='absent'?'vắng':'muộn'})`);
+  L.push(`- Vắng/muộn: ${abs.length ? abs.join(', ') : 'không có — cả lớp đi học đầy đủ'}`);
 
   if(types.length){
-    L.push('');
-    L.push('BTVN còn thiếu (gộp theo đầu mục, tên HS liệt kê dưới mỗi mục — KHÔNG tính học sinh vắng mặt vào đây, vì vắng đã thể hiện ở mục điểm danh rồi):');
-    let any = false;
-    types.forEach(t=>{
-      const names = students.filter(st=>{
-        if(session.attendance[st.id]==='absent') return false;
-        return ((session.checklist[st.id]||{})[t.id]||'none')!=='full';
-      }).map(st=>st.name);
-      if(names.length){ any=true; L.push(`${t.name}: ${names.join(', ')}`); }
-    });
-    if(!any) L.push('Cả lớp hoàn thành đầy đủ.');
-
-    // Danh sách riêng: học sinh làm ĐỦ tất cả các loại bài (để khen ngợi), không tính học sinh vắng
-    const doneFull = students.filter(st=>{
-      if(session.attendance[st.id]==='absent') return false;
-      return types.every(t=> ((session.checklist[st.id]||{})[t.id]||'none')==='full');
-    }).map(st=>st.name);
-    L.push('');
-    L.push('Học sinh hoàn thành ĐỦ tất cả bài tập (để khen ngợi):');
-    L.push(doneFull.length ? doneFull.join(', ') : '(Không có học sinh nào hoàn thành đủ tất cả các loại bài trong buổi này.)');
+    const miss = types.map(t=>{
+      const names = students.filter(st=> !isAbsent(st) && ((session.checklist[st.id]||{})[t.id]||'none')!=='full').map(st=>st.name);
+      return names.length ? `${t.name}: ${names.join(', ')}` : '';
+    }).filter(Boolean);
+    const full = students.filter(st=> !isAbsent(st) && types.every(t=>((session.checklist[st.id]||{})[t.id]||'none')==='full')).map(st=>st.name);
+    L.push(`- Còn thiếu bài: ${miss.length ? miss.join(' | ') : 'không có'}`);
+    L.push(`- Hoàn thành đủ bài: ${full.length ? full.join(', ') : 'không có'}`);
   }
 
-  // Chép phạt / chép lại từ: giao mới ở buổi này + còn nợ từ buổi trước (chưa kiểm tra xong)
-  const punishNew = students.filter(st=> session.punishmentAssigned && session.punishmentAssigned[st.id]).map(st=>st.name);
-  const punishOwed = getPendingPunishments(classId, date).filter(st=> !(session.punishmentDone && session.punishmentDone[st.id])).map(st=>st.name);
-  L.push('');
-  L.push('Chép phạt / chép lại từ (học sinh cần chép lại từ vựng/lỗi sai ở nhà):');
-  L.push(`Giao mới ở buổi này: ${punishNew.length ? punishNew.join(', ') : '(không có)'}`);
-  L.push(`Còn nợ từ buổi trước, cần nộp để cô kiểm tra: ${punishOwed.length ? punishOwed.join(', ') : '(không có)'}`);
-
-  if(exercises.length){
-    exercises.forEach(e=>{
-      const scored = students.map(st=>({
-        name: st.name,
-        score: exerciseScoreOn10(e, (session.scores[st.id]||{})[e.id]),
-      })).filter(x=>x.score!==null);
-      const titleSuffix = exerciseMode(e)==='scale10' ? '(thang điểm 10)' : `(.../${exerciseTotal(e)} câu)`;
-      L.push('');
-      L.push(`Điểm "${e.name}" ${titleSuffix}:`);
-      if(!scored.length){ L.push('Chưa có điểm.'); return; }
-
-      if(showFull){
-        L.push('Điểm đầy đủ của cả lớp (liệt kê TẤT CẢ học sinh):');
-        L.push(scored.map(x=>`${x.name}: ${x.score.toFixed(1)}`).join(' · '));
-      } else {
-        // Chỉ hiện đúng Top 5 học sinh điểm cao nhất lớp (đồng điểm ở hạng 5 thì lấy theo thứ tự danh sách lớp)
-        const topScorers = scored.slice().sort((a,b)=>b.score-a.score).slice(0,5);
-
-        L.push('Top 5 học sinh điểm cao nhất lớp (xếp từ cao xuống thấp) — chỉ liệt kê đúng 5 em này kèm điểm, các em khác không hiện tên/điểm:');
-        L.push(topScorers.length ? topScorers.map(x=>`${x.name}: ${x.score.toFixed(1)}`).join(' · ') : '(Chưa có điểm.)');
-      }
-
-      const max = Math.max(...scored.map(x=>x.score)), min = Math.min(...scored.map(x=>x.score));
-      const avg = scored.reduce((a,b)=>a+b.score,0)/scored.length;
-      const top = scored.filter(x=>x.score===max).map(x=>x.name).join(', ');
-      L.push(showFull
-        ? `Tổng kết: Cao nhất ${max.toFixed(1)} — HS đạt: ${top} · Thấp nhất ${min.toFixed(1)} · TB lớp ${avg.toFixed(1)}`
-        : `Tổng kết (tính trên cả lớp, dùng để hiện số liệu chung, KHÔNG liệt kê thêm tên nào khác ngoài danh sách trên): Cao nhất ${max.toFixed(1)} — HS đạt: ${top} · Thấp nhất ${min.toFixed(1)} (không nêu tên) · TB lớp ${avg.toFixed(1)}`);
-    });
-
-    // Ghi chú: gộp 1 lần duy nhất cho cả buổi (không lặp lại theo từng bài luyện tập)
-    const notedStudents = students.filter(st=>(session.studentNotes[st.id]||'').trim());
-    L.push('');
-    L.push('Ghi chú của giáo viên (CHỈ hiện 1 lần duy nhất — đặt trong 1 khung riêng ngay dưới toàn bộ phần kết quả điểm, KHÔNG lặp lại ghi chú theo từng bài luyện tập):');
-    L.push(notedStudents.length ? notedStudents.map(st=>`${st.name} — ${session.studentNotes[st.id].trim()}`).join(' · ') : '(Không có học sinh nào có ghi chú riêng cho buổi này.)');
+  const pNew = students.map(st=>({st, n:punishAssignCount((session.punishmentAssigned||{})[st.id])})).filter(x=>x.n>0).map(x=>`${x.st.name} (${x.n} lần)`);
+  const pOwed = students.map(st=>({st, n:punishmentRemainingAfterCheck(classId, st.id, session)})).filter(x=>x.n>0).map(x=>`${x.st.name} (${x.n} lần)`);
+  if(pNew.length || pOwed.length){
+    L.push(`- Chép từ (mỗi từ chép lại theo số lần ghi trong ngoặc để ghi nhớ): bài mới hôm nay: ${pNew.length ? pNew.join(', ') : 'không có'}; cần hoàn thiện và nộp buổi sau: ${pOwed.length ? pOwed.join(', ') : 'không có'}`);
   }
 
+  exercises.forEach(e=>{
+    const scored = students.map(st=>({name:st.name, score:exerciseScoreOn10(e, (session.scores[st.id]||{})[e.id])})).filter(x=>x.score!==null);
+    if(!scored.length) return;
+    const sorted = scored.slice().sort((a,b)=>b.score-a.score);
+    const max = sorted[0].score, min = sorted[sorted.length-1].score;
+    const avg = scored.reduce((a,b)=>a+b.score,0)/scored.length;
+    const topNames = scored.filter(x=>x.score===max).map(x=>x.name).join(', ');
+    const list = (showFull ? scored : sorted.slice(0,5)).map(x=>`${x.name} ${x.score.toFixed(1)}`).join(' · ');
+    L.push(`- Điểm "${e.name}" (thang 10) — ${showFull ? 'cả lớp' : 'Top 5'}: ${list}. Cao nhất ${max.toFixed(1)} (${topNames}) · Thấp nhất ${min.toFixed(1)}${showFull?'':' (không nêu tên)'} · TB lớp ${avg.toFixed(1)}`);
+  });
+
+  const notes = students.filter(st=>(session.studentNotes[st.id]||'').trim()).map(st=>`${st.name}: ${session.studentNotes[st.id].trim()}`);
+  if(notes.length) L.push(`- Ghi chú của giáo viên: ${notes.join(' · ')}`);
+  L.push(`- Người ký: ${signName}`);
+
   L.push('');
-  L.push('=== YÊU CẦU THIẾT KẾ ===');
-  L.push('Flat design hiện đại, dọc khổ A4, font Arial toàn bộ. Tông màu chủ đạo: XANH NGỌC (teal/turquoise — tuyệt đối KHÔNG dùng màu xanh dương (blue), tím hay chàm), có hiệu ứng GRADIENT xuyên suốt toàn ảnh (không dùng màu xanh phẳng đơn sắc) — nền tổng thể là gradient xanh nhạt (từ #E6F7F5 phía trên chuyển dần xuống #F6FBFA phía dưới); mỗi card/section cũng có điểm nhấn gradient xanh (VD dải màu mỏng phía trên card, khung icon nền gradient #41BFB6→#1F8A82, hoặc viền gradient nhẹ) thay vì icon/viền màu xanh phẳng 1 tông. Bố cục linh hoạt theo nội dung thật: mục ít thông tin (VD không ai vắng, không ai thiếu bài) thì thu gọn, không để trống lãng phí; mục nhiều thông tin thì đủ chỗ hiển thị, không ép chật — không chia đều diện tích cố định theo khung mẫu. Điểm nhấn phụ rất tiết chế bằng đỏ san hô #E5484D (chỉ dùng cho viền badge ngày và một đường kẻ mảnh dưới tiêu đề). Gói gọn trong 1 trang, padding vừa phải, bo góc 12-16px, bóng đổ mềm.');
-  L.push('');
-  L.push('HEADER: nền gradient xanh ngọc đậm (#41BFB6→#1F8A82), tiêu đề "BÁO CÁO TỔNG KẾT BUỔI HỌC" hoa đậm trắng. Dòng phụ: icon sách + "Môn học: Tiếng Anh" (KHÔNG ghi tên giáo viên ở header). Góc phải: badge tròn trắng icon lịch + ngày.');
-  L.push('SECTION 1 "NỘI DUNG BÀI HỌC": card trắng bo góc, dải/icon nhấn gradient xanh, danh sách gạch đầu dòng, từ khóa in đậm.');
-  if(hasNote) L.push('SECTION "LƯU Ý BUỔI HỌC" (chỉ thêm mục này vì có nội dung): card trắng nhỏ gọn, icon 📌 nền gradient xanh, danh sách gạch đầu dòng ngắn.');
-  L.push('SECTION "NỀN NẾP & Ý THỨC" / "BÀI TẬP VỀ NHÀ": 2 cột song song, chiều cao mỗi cột co giãn tự do theo nội dung (không cố định bằng nhau). Cột trái: icon mặt trời nền gradient xanh, chỉ liệt kê HS vắng/muộn dạng pill (đỏ nhạt "Vắng", cam "Muộn"); trống thì hiện "Cả lớp có mặt đầy đủ 🎉". Cột phải: icon cây bút nền gradient xanh, gồm 2 phần rõ rệt — (1) "Còn thiếu": trình bày theo từng đầu mục loại bài thiếu (tên loại bài làm tiêu đề nhỏ đậm), tên HS thiếu bài đó xếp thành pill cam ngay dưới, trống thì bỏ qua phần này; (2) ngay bên dưới, tiêu đề nhỏ "✅ Hoàn thành đầy đủ" — liệt kê tên các học sinh làm đủ tất cả bài (dạng pill xanh lá nhạt), lấy đúng danh sách "Học sinh hoàn thành ĐỦ tất cả bài tập" ở phần DỮ LIỆU; nếu rỗng thì bỏ qua phần này; (3) ngay bên dưới nữa, tiêu đề nhỏ "📌 Chép phạt (chép lại từ)" gồm 2 dòng pill vàng nhạt viền cam: "Giao mới buổi này" và "Còn nợ — nộp để cô kiểm tra", lấy đúng tên ở dòng "Chép phạt / chép lại từ" trong phần DỮ LIỆU; dòng nào là "(không có)" thì bỏ dòng đó, cả hai đều không có thì bỏ hẳn phần này.');
-  if(showFull){
-    L.push('SECTION "KẾT QUẢ BÀI KIỂM TRA/LUYỆN TẬP": icon bia bắn. Với mỗi đầu điểm: 1 bảng đầy đủ 2 cột "Họ và tên" | "Điểm" liệt kê TẤT CẢ học sinh trong lớp, TẤT CẢ điểm cùng 1 màu xanh ngọc đậm #1F7A73 (không phân cấp màu theo mức điểm). Dưới mỗi bảng điểm có 3 badge nhỏ nền gradient xanh nhạt (VD #E3F6F4→#C9EDE8): "🏆 Cao nhất: [điểm] — [tên]", "📉 Thấp nhất: [điểm] — [tên]", "📊 TB lớp: [điểm]" (chữ điểm giữ màu xanh ngọc đậm #1F7A73 phẳng để dễ đọc, chỉ nền badge là gradient). Nhiều đầu điểm thì xếp thành các khối liền nhau. SAU CÙNG — khi đã hết toàn bộ các đầu điểm, thêm 1 khung riêng biệt DUY NHẤT (không lặp lại theo từng bài), nền nhạt khác màu để phân biệt, tiêu đề nhỏ "📝 Ghi chú của giáo viên", nội dung lấy đúng từ dòng "Ghi chú của giáo viên" ở phần DỮ LIỆU; nếu rỗng thì bỏ qua cả khung này.');
-  } else {
-    L.push('SECTION "KẾT QUẢ BÀI KIỂM TRA/LUYỆN TẬP": icon bia bắn. Ngay dưới tiêu đề section, thêm 1 dòng phụ đề nhỏ, chữ nghiêng, màu xám xanh nhạt: "Cô đính kèm một số bài đạt điểm tốt trong lớp". QUAN TRỌNG — vì lý do bảo mật điểm số của trung tâm, KHÔNG được liệt kê điểm của toàn bộ học sinh, chỉ hiển thị đúng Top 5 học sinh điểm cao nhất đã cho trong phần DỮ LIỆU. Với mỗi đầu điểm: 1 bảng gọn 2 cột "Họ và tên" | "Điểm", TẤT CẢ điểm cùng 1 màu xanh ngọc đậm #1F7A73 (không phân cấp màu theo mức điểm); nếu danh sách rỗng thì bỏ qua bảng đó, chỉ hiện phần tổng kết. Dưới mỗi bảng điểm có 3 badge nhỏ nền gradient xanh nhạt (VD #E3F6F4→#C9EDE8): "🏆 Cao nhất: [điểm] — [tên học sinh đạt điểm đó]" (BẮT BUỘC ghi tên, lấy đúng tên trong phần DỮ LIỆU), "📉 Thấp nhất: [điểm]" (CHỈ ghi điểm số, TUYỆT ĐỐI KHÔNG ghi tên học sinh nào ở badge này), "📊 TB lớp: [điểm]" (chữ điểm giữ màu xanh ngọc đậm #1F7A73 phẳng để dễ đọc, chỉ nền badge là gradient). Nhiều đầu điểm thì xếp thành các khối liền nhau. SAU CÙNG — khi đã hết toàn bộ các đầu điểm, thêm 1 khung riêng biệt DUY NHẤT (không lặp lại theo từng bài), nền nhạt khác màu để phân biệt, tiêu đề nhỏ "📝 Ghi chú của giáo viên", nội dung lấy đúng từ dòng "Ghi chú của giáo viên" ở phần DỮ LIỆU; nếu rỗng thì bỏ qua cả khung này. TUYỆT ĐỐI KHÔNG tự thêm tên/điểm của học sinh nào ngoài danh sách đã cho, kể cả khi biết điểm của họ qua phần tổng kết.');
-  }
-  L.push('FOOTER: chữ in nghiêng, canh giữa, xám nhạt: "Trân trọng cảm ơn Quý phụ huynh đã đồng hành cùng lớp học!"');
-  L.push('CHỮ KÝ (dưới cùng khổ A4, căn phải, bên dưới dòng cảm ơn): dòng chữ nhỏ "Giáo viên" (Arial, xám đậm), ngay dưới là tên "' + signName + '" viết như CHỮ KÝ TAY bằng font thư pháp/chữ ký (signature script, nét mảnh liền mạch, hơi nghiêng, cỡ lớn hơn chữ thường, màu xanh ngọc đậm #1F7A73), GIỮ ĐÚNG đủ dấu tiếng Việt. Không ghi tên giáo viên ở bất kỳ chỗ nào khác trong ảnh.');
-  L.push('');
-  L.push('Dùng đúng số liệu ở phần DỮ LIỆU (tên, điểm, điểm danh, mức hoàn thành bài) để điền vào đúng mục tương ứng, toàn bộ tiếng Việt có dấu, không lỗi chính tả.');
+  L.push('THIẾT KẾ');
+  L.push('- Tông xanh ngọc (teal) #41BFB6 → #1F7A73, nền trang rất nhạt #F3FBFA, điểm nhấn đỏ san hô #E5484D dùng tiết chế. Không dùng xanh dương, tím, chàm.');
+  L.push('- Header: dải xanh ngọc, tiêu đề chữ trắng, dòng phụ "Môn: Tiếng Anh · Lớp …", ngày ở góc phải. Không ghi tên giáo viên ở header.');
+  L.push('- Thân trang gồm các khung trắng bo góc, đổ bóng nhẹ: Nội dung bài học → 2 cột Điểm danh | Bài tập về nhà → Kết quả kiểm tra → Ghi chú giáo viên. Mục nào "không có" thì bỏ hoặc thu gọn, không để trống.');
+  L.push('- Tên học sinh dạng pill: đỏ nhạt = vắng, cam = thiếu bài, xanh lá nhạt = hoàn thành đủ, vàng viền cam = chép từ kèm số lần. Mục này đặt tiêu đề "✍️ Chép từ", lời lẽ nhẹ nhàng, khích lệ; không dùng các từ "phạt", "nợ", "vi phạm".');
+  L.push(showFull
+    ? '- Kết quả kiểm tra: bảng "Họ và tên | Điểm" cho cả lớp, điểm cùng màu xanh ngọc đậm; dưới bảng 3 badge Cao nhất / Thấp nhất / TB lớp.'
+    : '- Kết quả kiểm tra: bảng Top 5 "Họ và tên | Điểm" (chỉ 5 em này, không hiện điểm em khác), điểm cùng màu xanh ngọc đậm; dưới bảng 3 badge Cao nhất (có tên) / Thấp nhất (chỉ ghi điểm) / TB lớp.');
+  L.push('- Cuối trang: dòng nghiêng căn giữa "Trân trọng cảm ơn Quý phụ huynh đã đồng hành cùng lớp học!"; góc phải dưới cùng: chữ nhỏ "Giáo viên", bên dưới là tên người ký viết bằng font chữ ký thư pháp có hỗ trợ tiếng Việt (VD Dancing Script), màu xanh ngọc đậm.');
+  L.push('- Gói gọn 1 trang, chữ đủ lớn để đọc trên điện thoại và khi in.');
   return L.join('\n');
 }
 
@@ -2487,7 +2471,7 @@ function renderReport(){
       ${sessionsForInfo.length ? `
       <div class="card no-print">
         <div class="card-title">🎨 Infographic tổng kết buổi học</div>
-        <div class="muted" style="margin-bottom:10px;">Chọn 1 buổi học đã ghi nhận, tạo prompt kèm đúng dữ liệu buổi đó — dán vào ChatGPT (bản tạo ảnh) để ra ngay ảnh infographic gửi phụ huynh.</div>
+        <div class="muted" style="margin-bottom:10px;">Chọn 1 buổi học đã ghi nhận, tạo prompt ngắn kèm đúng dữ liệu buổi đó — dán vào Claude để ra file PDF 1 trang gửi phụ huynh.</div>
         <div style="display:flex; gap:8px; align-items:flex-end; flex-wrap:wrap;">
           <div style="flex:1; min-width:200px;">
             <label class="field-label">Buổi học</label>
@@ -6181,17 +6165,20 @@ async function handleAction(action, elx, e){
       saveSessions(state.currentClassId);
       break;
     }
-    case 'toggle-punishment-done': {
+    case 'set-punishment-check': {
       const sess = ensureSessionEditable();
       if(!sess.punishmentDone) sess.punishmentDone = {};
-      sess.punishmentDone[elx.dataset.student] = elx.checked;
+      const v = elx.value;
+      if(v==='') delete sess.punishmentDone[elx.dataset.student];
+      else sess.punishmentDone[elx.dataset.student] = (v==='full') ? true : Number(v);
       saveSessions(state.currentClassId);
       break;
     }
-    case 'toggle-punishment-assign': {
+    case 'set-punishment-assign': {
       const sess = ensureSessionEditable();
       if(!sess.punishmentAssigned) sess.punishmentAssigned = {};
-      sess.punishmentAssigned[elx.dataset.student] = elx.checked;
+      const n = Math.max(0, Math.min(PUNISH_MAX, Number(elx.value)||0));
+      if(n) sess.punishmentAssigned[elx.dataset.student] = n; else delete sess.punishmentAssigned[elx.dataset.student];
       saveSessions(state.currentClassId);
       break;
     }
@@ -6216,7 +6203,7 @@ async function handleAction(action, elx, e){
       const el = document.getElementById('session-infographic-prompt-text');
       const text = el ? el.value : state.report.infographicPrompt;
       copyTextToClipboard(text).then(ok=>{
-        showToast(ok ? 'Đã copy — dán vào ChatGPT để tạo infographic.' : 'Không copy được, cô bôi đen (Ctrl+A) rồi Ctrl+C nhé.', 3200);
+        showToast(ok ? 'Đã copy — dán vào Claude để tạo PDF.' : 'Không copy được, cô bôi đen (Ctrl+A) rồi Ctrl+C nhé.', 3200);
       });
       break;
     }
