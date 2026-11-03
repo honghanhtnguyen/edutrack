@@ -2246,6 +2246,14 @@ function buildSessionInfographicPrompt(classId, date, scoreMode){
     L.push(doneFull.length ? doneFull.join(', ') : '(Không có học sinh nào hoàn thành đủ tất cả các loại bài trong buổi này.)');
   }
 
+  // Chép phạt / chép lại từ: giao mới ở buổi này + còn nợ từ buổi trước (chưa kiểm tra xong)
+  const punishNew = students.filter(st=> session.punishmentAssigned && session.punishmentAssigned[st.id]).map(st=>st.name);
+  const punishOwed = getPendingPunishments(classId, date).filter(st=> !(session.punishmentDone && session.punishmentDone[st.id])).map(st=>st.name);
+  L.push('');
+  L.push('Chép phạt / chép lại từ (học sinh cần chép lại từ vựng/lỗi sai ở nhà):');
+  L.push(`Giao mới ở buổi này: ${punishNew.length ? punishNew.join(', ') : '(không có)'}`);
+  L.push(`Còn nợ từ buổi trước, cần nộp để cô kiểm tra: ${punishOwed.length ? punishOwed.join(', ') : '(không có)'}`);
+
   if(exercises.length){
     exercises.forEach(e=>{
       const scored = students.map(st=>({
@@ -2290,7 +2298,7 @@ function buildSessionInfographicPrompt(classId, date, scoreMode){
   L.push('HEADER: nền gradient xanh ngọc đậm (#41BFB6→#1F8A82), tiêu đề "BÁO CÁO TỔNG KẾT BUỔI HỌC" hoa đậm trắng. Dòng phụ: icon sách + "Môn học: Tiếng Anh" (KHÔNG ghi tên giáo viên ở header). Góc phải: badge tròn trắng icon lịch + ngày.');
   L.push('SECTION 1 "NỘI DUNG BÀI HỌC": card trắng bo góc, dải/icon nhấn gradient xanh, danh sách gạch đầu dòng, từ khóa in đậm.');
   if(hasNote) L.push('SECTION "LƯU Ý BUỔI HỌC" (chỉ thêm mục này vì có nội dung): card trắng nhỏ gọn, icon 📌 nền gradient xanh, danh sách gạch đầu dòng ngắn.');
-  L.push('SECTION "NỀN NẾP & Ý THỨC" / "BÀI TẬP VỀ NHÀ": 2 cột song song, chiều cao mỗi cột co giãn tự do theo nội dung (không cố định bằng nhau). Cột trái: icon mặt trời nền gradient xanh, chỉ liệt kê HS vắng/muộn dạng pill (đỏ nhạt "Vắng", cam "Muộn"); trống thì hiện "Cả lớp có mặt đầy đủ 🎉". Cột phải: icon cây bút nền gradient xanh, gồm 2 phần rõ rệt — (1) "Còn thiếu": trình bày theo từng đầu mục loại bài thiếu (tên loại bài làm tiêu đề nhỏ đậm), tên HS thiếu bài đó xếp thành pill cam ngay dưới, trống thì bỏ qua phần này; (2) ngay bên dưới, tiêu đề nhỏ "✅ Hoàn thành đầy đủ" — liệt kê tên các học sinh làm đủ tất cả bài (dạng pill xanh lá nhạt), lấy đúng danh sách "Học sinh hoàn thành ĐỦ tất cả bài tập" ở phần DỮ LIỆU; nếu rỗng thì bỏ qua phần này.');
+  L.push('SECTION "NỀN NẾP & Ý THỨC" / "BÀI TẬP VỀ NHÀ": 2 cột song song, chiều cao mỗi cột co giãn tự do theo nội dung (không cố định bằng nhau). Cột trái: icon mặt trời nền gradient xanh, chỉ liệt kê HS vắng/muộn dạng pill (đỏ nhạt "Vắng", cam "Muộn"); trống thì hiện "Cả lớp có mặt đầy đủ 🎉". Cột phải: icon cây bút nền gradient xanh, gồm 2 phần rõ rệt — (1) "Còn thiếu": trình bày theo từng đầu mục loại bài thiếu (tên loại bài làm tiêu đề nhỏ đậm), tên HS thiếu bài đó xếp thành pill cam ngay dưới, trống thì bỏ qua phần này; (2) ngay bên dưới, tiêu đề nhỏ "✅ Hoàn thành đầy đủ" — liệt kê tên các học sinh làm đủ tất cả bài (dạng pill xanh lá nhạt), lấy đúng danh sách "Học sinh hoàn thành ĐỦ tất cả bài tập" ở phần DỮ LIỆU; nếu rỗng thì bỏ qua phần này; (3) ngay bên dưới nữa, tiêu đề nhỏ "📌 Chép phạt (chép lại từ)" gồm 2 dòng pill vàng nhạt viền cam: "Giao mới buổi này" và "Còn nợ — nộp để cô kiểm tra", lấy đúng tên ở dòng "Chép phạt / chép lại từ" trong phần DỮ LIỆU; dòng nào là "(không có)" thì bỏ dòng đó, cả hai đều không có thì bỏ hẳn phần này.');
   if(showFull){
     L.push('SECTION "KẾT QUẢ BÀI KIỂM TRA/LUYỆN TẬP": icon bia bắn. Với mỗi đầu điểm: 1 bảng đầy đủ 2 cột "Họ và tên" | "Điểm" liệt kê TẤT CẢ học sinh trong lớp, TẤT CẢ điểm cùng 1 màu xanh ngọc đậm #1F7A73 (không phân cấp màu theo mức điểm). Dưới mỗi bảng điểm có 3 badge nhỏ nền gradient xanh nhạt (VD #E3F6F4→#C9EDE8): "🏆 Cao nhất: [điểm] — [tên]", "📉 Thấp nhất: [điểm] — [tên]", "📊 TB lớp: [điểm]" (chữ điểm giữ màu xanh ngọc đậm #1F7A73 phẳng để dễ đọc, chỉ nền badge là gradient). Nhiều đầu điểm thì xếp thành các khối liền nhau. SAU CÙNG — khi đã hết toàn bộ các đầu điểm, thêm 1 khung riêng biệt DUY NHẤT (không lặp lại theo từng bài), nền nhạt khác màu để phân biệt, tiêu đề nhỏ "📝 Ghi chú của giáo viên", nội dung lấy đúng từ dòng "Ghi chú của giáo viên" ở phần DỮ LIỆU; nếu rỗng thì bỏ qua cả khung này.');
   } else {
